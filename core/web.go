@@ -359,10 +359,17 @@ func GinApi(method string, path string, fs ...func(c *gin.Context)) {
 		Path:   path,
 		Handle: func(c *gin.Context) {
 			defer func() {
-				recover()
+				if err := recover(); err != nil {
+					if !c.Writer.Written() {
+						ApiError(c, http.StatusInternalServerError, fmt.Sprint(err))
+					}
+				}
 			}()
 			for _, f := range fs {
 				f(c)
+				if c.IsAborted() {
+					return
+				}
 			}
 		},
 	})

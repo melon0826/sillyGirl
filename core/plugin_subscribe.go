@@ -37,7 +37,9 @@ var builtinGithubAccelerators = []string{
 }
 
 type RequestPluginResult struct {
-	Success bool               `json:"success"`
+	Success bool               `json:"success,omitempty"`
+	Code    int                `json:"code,omitempty"`
+	Message string             `json:"message,omitempty"`
 	Data    []*common.Function `json:"data"`
 	Page    int                `json:"page"`
 	Total   int                `json:"total"`
@@ -80,48 +82,42 @@ var plugin_downloads = MakeBucket("plugin_downloads")
 
 func initWebPluginList() {
 	GinApi(GET, "/api/plugins/sources", RequireAuth, func(ctx *gin.Context) {
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    pluginSourceAddresses(),
-		})
+		ApiOK(ctx, pluginSourceAddresses())
 	})
 	GinApi(GET, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"proxy":   githubAcceleratorPrefix(),
-				"options": builtinGithubAccelerators,
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"proxy":   githubAcceleratorPrefix(),
+			"options": builtinGithubAccelerators,
 		})
 	})
 	GinApi(PUT, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		proxy, err := normalizeGithubAcceleratorPrefix(payload["proxy"])
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		sillyGirl.Set(pluginSourceGithubProxyKey, proxy)
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": map[string]interface{}{"proxy": proxy}})
+		ApiOK(ctx, map[string]interface{}{"proxy": proxy})
 	})
 	GinApi(POST, "/api/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		address := normalizePluginSourceAddress(payload["address"])
 		if address == "" {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "插件源地址不能为空"})
+			ApiFail(ctx, "插件源地址不能为空")
 			return
 		}
 		items, err := pluginSourceItems(address)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		sources := pluginSourceAddresses()
@@ -130,12 +126,12 @@ func initWebPluginList() {
 			savePluginSourceAddresses(sources)
 		}
 		plugin_list = append(plugin_list[:0], listPluginSources()...)
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": map[string]interface{}{"address": address, "count": len(items)}})
+		ApiOK(ctx, map[string]interface{}{"address": address, "count": len(items)})
 	})
 	GinApi(DELETE, "/api/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		address := normalizePluginSourceAddress(payload["address"])
@@ -147,7 +143,7 @@ func initWebPluginList() {
 		}
 		savePluginSourceAddresses(next)
 		plugin_list = append(plugin_list[:0], listPluginSources()...)
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 	GinApi(GET, "/api/plugins/list.json", func(ctx *gin.Context) {
 		// ctx.QueryArray()
@@ -159,9 +155,7 @@ func initWebPluginList() {
 		keyword := ctx.Query("keyword")
 		class := ctx.Query("class")
 		mclass := ctx.Query("mclass")
-		rr := RequestPluginResult{
-			Success: true,
-		}
+		rr := RequestPluginResult{}
 		if pageSize == 0 {
 			pageSize = 10
 		}
@@ -284,7 +278,7 @@ func initWebPluginList() {
 			rr.Tab = tab
 			rr.Total = len(list)
 			if len(list) == 0 {
-				ctx.JSON(200, rr)
+				ApiOK(ctx, rr)
 				return
 			}
 			if last := (rr.Total + pageSize - 1) / pageSize; current > last {
@@ -340,11 +334,11 @@ func initWebPluginList() {
 				rr.Data[i].Description = parseReply2(rr.Data[i].Description)
 			}
 
-			ctx.JSON(200, rr)
+			ApiOK(ctx, rr)
 			return
 		}
 
-		ctx.JSON(200, GetPublicResponse())
+		ApiOK(ctx, GetPublicResponse())
 	})
 }
 
@@ -432,11 +426,33 @@ func linkPluginSourceItems(address string) ([]*common.Function, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("link 插件源读取失败：HTTP %d", resp.StatusCode)
 	}
-	result := RequestPluginResult{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	payload := map[string]json.RawMessage{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
-	if !result.Success {
+	result := RequestPluginResult{}
+	if raw, ok := payload["status"]; ok {
+		status := false
+		_ = json.Unmarshal(raw, &status)
+		if !status {
+			return nil, errors.New("无效的 link 插件源")
+		}
+		if raw, ok := payload["data"]; ok {
+			if err := json.Unmarshal(raw, &result); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		if data, err := json.Marshal(payload); err == nil {
+			if err := json.Unmarshal(data, &result); err != nil {
+				return nil, err
+			}
+		}
+		if !result.Success {
+			return nil, errors.New("无效的 link 插件源")
+		}
+	}
+	if len(result.Data) == 0 {
 		return nil, errors.New("无效的 link 插件源")
 	}
 	for _, item := range result.Data {
@@ -976,9 +992,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func GetPublicResponse() *RequestPluginResult {
-	rr := &RequestPluginResult{
-		Success: true,
-	}
+	rr := &RequestPluginResult{}
 	fs := []*common.Function{}
 	for _, f := range Functions {
 		if f.Public {

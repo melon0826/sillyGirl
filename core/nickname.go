@@ -94,9 +94,6 @@ func init() {
 			}}, data2...)
 		}
 		// }
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    data,
-		})
+		ApiOK(ctx, data)
 	})
 }

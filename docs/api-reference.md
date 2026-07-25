@@ -23,6 +23,28 @@
 
 Base URL: `http://host:port/api`
 
+### 统一响应
+
+除文件下载等原始内容接口外，HTTP API 统一返回：
+
+```json
+{
+  "status": true,
+  "message": "成功",
+  "data": {}
+}
+```
+
+失败时：
+
+```json
+{
+  "status": false,
+  "message": "失败原因",
+  "data": null
+}
+```
+
 ### 认证
 
 部分 API 需要认证，通过请求头传递：
@@ -150,13 +172,17 @@ curl "http://localhost:8080/api/web_chat?rid=user123"
 **响应格式**：
 
 ```json
-[
-  {
-    "t": "chat",
-    "c": "Hello World!",
-    "m": []
-  }
-]
+{
+  "status": true,
+  "message": "成功",
+  "data": [
+    {
+      "t": "chat",
+      "c": "Hello World!",
+      "m": []
+    }
+  ]
+}
 ```
 
 | 字段 | 类型 | 说明 |

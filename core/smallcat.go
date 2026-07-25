@@ -39,44 +39,40 @@ type smallcatAuthValidateResponse struct {
 func init() {
 	GinApi(GET, "/api/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getSmallcatPanels()
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    panels,
-			"total":   len(panels),
-		})
+		ApiList(ctx, panels, len(panels))
 	})
 
 	GinApi(POST, "/api/smallcat/panel/test", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := validateSmallcatPanelInput(&panel); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		result, err := testSmallcatPanel(panel)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": result})
+		ApiOK(ctx, result)
 	})
 
 	GinApi(POST, "/api/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := validateSmallcatPanelInput(&panel); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		result, err := testSmallcatPanel(panel)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		now := int(time.Now().Unix())
@@ -115,17 +111,17 @@ func init() {
 			panels = append(panels, panel)
 		}
 		saveSmallcatPanels(panels)
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": panel})
+		ApiOK(ctx, panel)
 	})
 
 	GinApi(DELETE, "/api/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if panel.ID == "" {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "缺少 smallcat ID"})
+			ApiFail(ctx, "缺少 smallcat ID")
 			return
 		}
 		panels := getSmallcatPanels()
@@ -136,7 +132,7 @@ func init() {
 			}
 		}
 		saveSmallcatPanels(next)
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 }
 

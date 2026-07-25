@@ -18,11 +18,10 @@ import (
 var cgs []CarryGroup
 
 type CarryGroupsResult struct {
-	Success bool         `json:"success"`
-	Data    []CarryGroup `json:"data"`
-	Page    int          `json:"page"`
-	Total   int          `json:"total"`
-	Time    time.Time    `json:"time"`
+	Data  []CarryGroup `json:"data"`
+	Page  int          `json:"page"`
+	Total int          `json:"total"`
+	Time  time.Time    `json:"time"`
 }
 
 var CarryGroups = MakeBucket("CarryGroups")
@@ -221,14 +220,14 @@ func init() {
 	GinApi(GET, "/api/carry/groups", RequireAuth, func(ctx *gin.Context) {
 		current := utils.Int(ctx.Query("current"))
 		pageSize := utils.Int(ctx.Query("pageSize"))
-		rr := CarryGroupsResult{
-			Success: true,
-		}
+		rr := CarryGroupsResult{}
 		cgs := cgs
 		rr.Total = len(cgs)
 		if current == 0 {
 			current = 1
 		}
+		rr.Page = current
+		rr.Time = time.Now()
 		if pageSize == 0 {
 			pageSize = 20
 		}
@@ -250,7 +249,7 @@ func init() {
 				rr.Data[i].ChatName = gn.Value
 			}
 		}
-		ctx.JSON(200, rr)
+		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
 	GinApi(GET, "/api/carry/group_names", RequireAuth, func(ctx *gin.Context) {
 		cgs := cgs
@@ -258,10 +257,7 @@ func init() {
 		for _, cg := range cgs {
 			names[cg.ID] = cg.ChatName
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    names,
-		})
+		ApiOK(ctx, names)
 	})
 	GinApi(GET, "/api/proxy/scripts", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}
@@ -271,10 +267,7 @@ func init() {
 				scripts[function.UUID] = function.Title + function.Suffix
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    scripts,
-		})
+		ApiOK(ctx, scripts)
 	})
 	var isNumeric = func(keyword string) bool {
 		for _, c := range keyword {
@@ -293,10 +286,7 @@ func init() {
 				scripts[keyword+suffix] = keyword + suffix
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    scripts,
-		})
+		ApiOK(ctx, scripts)
 	})
 	GinApi(GET, "/api/carry/group_selects", RequireAuth, func(ctx *gin.Context) {
 		chat_id := ctx.Query("chat_id")
@@ -318,13 +308,10 @@ func init() {
 				scripts[function.UUID] = function.Title + function.Suffix
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"bots_id":   bots_id,
-				"platforms": getPltsArray(),
-				"scripts":   scripts,
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"bots_id":   bots_id,
+			"platforms": getPltsArray(),
+			"scripts":   scripts,
 		})
 	})
 	GinApi(POST, "/api/carry/group", RequireAuth, func(ctx *gin.Context) {
@@ -332,26 +319,17 @@ func init() {
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		chat_id := strings.TrimSpace(fmt.Sprint(updateData["chat_id"]))
 		if chat_id == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "群号不能为空",
-			})
+			ApiFail(ctx, "群号不能为空")
 			return
 		}
 		platform := strings.TrimSpace(fmt.Sprint(updateData["platform"]))
 		if platform == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "平台不能为空",
-			})
+			ApiFail(ctx, "平台不能为空")
 			return
 		}
 		var cg = CarryGroup{
@@ -374,13 +352,6 @@ func init() {
 		cg.Exclude = nil
 		cg.Deduplication = false
 		cg.Deduplication2 = false
-		// if err != nil {
-		// 	ctx.JSON(200, map[string]interface{}{
-		// 		"success":      false,
-		// 		"errorMessage": err.Error(),
-		// 	})
-		// 	return
-		// }
 		for key, value := range updateData {
 			switch key {
 			case "remark":
@@ -402,37 +373,24 @@ func init() {
 		}
 		CarryGroups.Set(chat_id, utils.JsonMarshal(cg))
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 	GinApi(DELETE, "/api/carry/group", RequireAuth, func(ctx *gin.Context) {
 		cg := &CarryGroup{}
 		err := ctx.BindJSON(cg)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if cg.ID == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "群号不为空",
-			})
+			ApiFail(ctx, "群号不为空")
 			return
 		}
 		CarryGroups.Set(cg.ID, "")
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 }
 

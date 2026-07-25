@@ -100,21 +100,15 @@ func init() {
 	})
 	///可视化部分
 	GinApi(GET, "/api/setup/status", func(ctx *gin.Context) {
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"initialized": strings.TrimSpace(password) != "",
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"initialized": strings.TrimSpace(password) != "",
 		})
 	})
 	GinApi(POST, "/api/setup/admin", func(ctx *gin.Context) {
 		setupLock.Lock()
 		defer setupLock.Unlock()
 		if strings.TrimSpace(password) != "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "后台账号已初始化",
-			})
+			ApiFail(ctx, "后台账号已初始化")
 			return
 		}
 		payload := struct {
@@ -122,16 +116,16 @@ func init() {
 			Username string `json:"username"`
 		}{}
 		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		payload.Username = strings.TrimSpace(payload.Username)
 		if payload.Username == "" {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "账号不能为空"})
+			ApiFail(ctx, "账号不能为空")
 			return
 		}
 		if strings.TrimSpace(payload.Password) == "" {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "密码不能为空"})
+			ApiFail(ctx, "密码不能为空")
 			return
 		}
 		sillyGirl.Set("name", payload.Username)
@@ -139,11 +133,10 @@ func init() {
 		name = payload.Username
 		token, err := createAdminJWTSession(ctx, name)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success":          true,
+		ApiOK(ctx, map[string]interface{}{
 			"status":           "ok",
 			"type":             "account",
 			"currentAuthority": "admin",
@@ -159,8 +152,7 @@ func init() {
 		json.NewDecoder(ctx.Request.Body).Decode(&auth)
 		auth.Username = strings.TrimSpace(auth.Username)
 		if strings.TrimSpace(password) == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":          true,
+			ApiOK(ctx, map[string]interface{}{
 				"status":           "setup_required",
 				"type":             "account",
 				"currentAuthority": "guest",
@@ -169,25 +161,18 @@ func init() {
 			return
 		}
 		if loginAttemptBlocked(ctx, auth.Username) {
-			ctx.JSON(200, map[string]interface{}{
-				"success":          true,
-				"status":           "error",
-				"type":             "account",
-				"currentAuthority": "guest",
-				"errorMessage":     "登录失败次数过多，请稍后再试",
-			})
+			ApiFail(ctx, "登录失败次数过多，请稍后再试")
 			return
 		}
 		if verifyAdminPassword(auth.Password) && auth.Username == name {
 			clearLoginAttempts(ctx, auth.Username)
 			token, err := createAdminJWTSession(ctx, name)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			console.Log("登录成功，当前有效令牌数%d，总数%d", len(ValidAuths()), len(auths))
-			ctx.JSON(200, map[string]interface{}{
-				"success":          true,
+			ApiOK(ctx, map[string]interface{}{
 				"status":           "ok",
 				"type":             "account",
 				"currentAuthority": "admin",
@@ -196,19 +181,12 @@ func init() {
 			})
 		} else {
 			recordFailedLoginAttempt(ctx, auth.Username)
-			ctx.JSON(200, map[string]interface{}{
-				"success":          true,
-				"status":           "error",
-				"type":             "account",
-				"currentAuthority": "guest",
-			})
+			ApiFail(ctx, "账号或密码错误")
 		}
 	})
 	GinApi(POST, "/api/login/outLogin", DestroyAuth, func(ctx *gin.Context) {
 		sillyGirl.Set("web_token", "")
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 	pluginNextUuid := sillyGirl.GetString("pluginNextUuid")
 	if pluginNextUuid == "" {
@@ -259,16 +237,13 @@ func init() {
 				}
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"name":         sillyGirl.GetString("name"),
-				"avatar":       "https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png",
-				"plugins":      rrs,
-				"adapters":     overviewAdapterStatuses(),
-				"integrations": overviewIntegrationStatuses(),
-				"version":      overviewVersionInfo(),
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"name":         sillyGirl.GetString("name"),
+			"avatar":       "https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png",
+			"plugins":      rrs,
+			"adapters":     overviewAdapterStatuses(),
+			"integrations": overviewIntegrationStatuses(),
+			"version":      overviewVersionInfo(),
 		})
 	})
 }
@@ -388,30 +363,13 @@ func checkTempAuth(uuid string) bool {
 
 func RequireAuth(c *gin.Context) {
 	if strings.TrimSpace(password) == "" {
-		c.JSON(401, map[string]interface{}{
-			"data": map[string]interface{}{
-				"isLogin":       false,
-				"setupRequired": true,
-			},
-			"errorCode":    "401",
-			"errorMessage": "后台未初始化，请先设置账号密码",
-			"success":      true,
-			"showType":     9,
-		})
+		ApiError(c, http.StatusUnauthorized, "后台未初始化，请先设置账号密码")
 		panic(errors.New("后台未初始化，请先设置账号密码"))
 	}
 	token := authTokenFromRequest(c)
 	_, err := CheckAuth(token)
 	if err != nil && !checkTempAuth(token) {
-		c.JSON(401, map[string]interface{}{
-			"data": map[string]interface{}{
-				"isLogin": false,
-			},
-			"errorCode":    "401",
-			"errorMessage": err.Error(),
-			"success":      true,
-			"showType":     9,
-		})
+		ApiError(c, http.StatusUnauthorized, err.Error())
 		panic(err)
 	}
 }

@@ -61,6 +61,19 @@ import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage
 import type { CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { timestamp } from './utils';
 
+type ApiEnvelope<T> = {
+  status?: boolean;
+  message?: string;
+  data: T;
+};
+
+function apiData<T>(res: ApiEnvelope<T> | T): T {
+  if (res && typeof res === 'object' && 'data' in (res as Record<string, unknown>)) {
+    return (res as ApiEnvelope<T>).data;
+  }
+  return res as T;
+}
+
 type PageKey =
   | 'welcome'
   | 'scripts'
@@ -98,7 +111,6 @@ const setupRequired = ref(false);
 const setupModel = reactive({ username: 'admin', password: '', confirm: '' });
 
 type AuthResponse = {
-  success?: boolean;
   status: string;
   token?: string;
   expiresIn?: number;
@@ -147,8 +159,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.0.9',
-    remote: info.remote || info.local || '0.0.9',
+    local: info.local || '0.1.0',
+    remote: info.remote || info.local || '0.1.0',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -198,16 +210,17 @@ function navigate(next: PageKey, path?: string) {
 }
 
 async function loadSetupStatus() {
-  const res = await get<{ success: boolean; data: { initialized: boolean } }>('/api/setup/status');
-  setupRequired.value = !res.data?.initialized;
-  return !!res.data?.initialized;
+  const res = await get<ApiEnvelope<{ initialized: boolean }>>('/api/setup/status');
+  const data = apiData(res);
+  setupRequired.value = !data?.initialized;
+  return !!data?.initialized;
 }
 
 async function loadUser(setBooting = true) {
   if (setBooting) booting.value = true;
   try {
-    const res = await get<{ success: boolean; data: CurrentUser }>('/api/currentUser');
-    user.value = res.data || {};
+    const res = await get<ApiEnvelope<CurrentUser>>('/api/currentUser');
+    user.value = apiData(res) || {};
     setupRequired.value = false;
   } catch (error) {
     if (error instanceof ApiError && error.status !== 401) message.error(error.message);
@@ -223,17 +236,18 @@ async function loadUser(setBooting = true) {
 
 async function login() {
   try {
-    const res = await post<AuthResponse>('/api/login/account', loginModel);
-    if (res.status === 'setup_required') {
+    const res = await post<ApiEnvelope<AuthResponse>>('/api/login/account', loginModel);
+    const auth = apiData(res);
+    if (auth.status === 'setup_required') {
       setupRequired.value = true;
       message.error('请先设置管理员账号和密码');
       return;
     }
-    if (res.status !== 'ok' || !res.token) {
+    if (auth.status !== 'ok' || !auth.token) {
       message.error('账号或密码不正确');
       return;
     }
-    setAuthToken(res.token);
+    setAuthToken(auth.token);
     message.success('已登录');
     await loadUser();
   } catch (error) {
@@ -255,12 +269,13 @@ async function setupAdmin() {
     return;
   }
   try {
-    const res = await post<AuthResponse>('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
-    if (res.status !== 'ok' || !res.token) {
+    const res = await post<ApiEnvelope<AuthResponse>>('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+    const auth = apiData(res);
+    if (auth.status !== 'ok' || !auth.token) {
       message.error('账号创建失败');
       return;
     }
-    setAuthToken(res.token);
+    setAuthToken(auth.token);
     message.success('账号已创建');
     setupRequired.value = false;
     loginModel.username = setupModel.username.trim();
@@ -401,11 +416,11 @@ async function loadScript(id = currentScriptId.value) {
   scriptState.loading = true;
   try {
     if (isNodeScript()) {
-      const res = await get<{ data: { content: string } }>(`/api/node/script?id=${encodeURIComponent(id)}`);
-      scriptState.content = res.data.content || '';
+      const res = await get<ApiEnvelope<{ content: string }>>(`/api/node/script?id=${encodeURIComponent(id)}`);
+      scriptState.content = apiData(res)?.content || '';
     } else {
       const res = await readStorage<Record<string, string>>(`plugins.${id}`);
-      scriptState.content = res.data[`plugins.${id}`] || starter;
+      scriptState.content = apiData(res)[`plugins.${id}`] || starter;
     }
   } finally {
     scriptState.loading = false;
@@ -486,10 +501,11 @@ async function createScript() {
   }
   scriptCreateState.saving = true;
   try {
-    const res = await post<{ data: { id: string } }>('/api/node/script', { name: fileName });
+    const res = await post<ApiEnvelope<{ id: string }>>('/api/node/script', { name: fileName });
+    const data = apiData(res);
     scriptCreateState.open = false;
     await loadUser();
-    if (res.data.id) navigate('scripts', `/admin/script/${res.data.id}`);
+    if (data.id) navigate('scripts', `/admin/script/${data.id}`);
   } finally {
     scriptCreateState.saving = false;
   }
@@ -545,8 +561,8 @@ const canRemoveStorageBucket = computed(() => !!selectedStorageBucket.value && !
 async function loadStorageBuckets() {
   storageState.loadingBuckets = true;
   try {
-    const res = await get<{ data: Array<{ value: string; text?: string }> }>('/api/storage');
-    storageState.buckets = (res.data || []).map((item) => ({
+    const res = await get<ApiEnvelope<Array<{ value: string; text?: string }>>>('/api/storage');
+    storageState.buckets = (apiData(res) || []).map((item) => ({
       value: item.value,
       label: item.text || item.value,
     }));
@@ -557,8 +573,8 @@ async function loadStorageBuckets() {
 async function loadStorage() {
   storageState.loading = true;
   try {
-    const res = await get<{ data: any[] }>(`/api/storage/list?keys=${encodeURIComponent(storageState.keys)}`);
-    storageState.rows = res.data || [];
+    const res = await get<ApiEnvelope<{ list: any[]; total: number }>>(`/api/storage/list?keys=${encodeURIComponent(storageState.keys)}`);
+    storageState.rows = apiData(res)?.list || [];
   } finally {
     storageState.loading = false;
   }
@@ -645,9 +661,10 @@ async function removeStorageBucket() {
 
 const replies = reactive({ rows: [] as Reply[], total: 0, editing: null as Reply | null, form: {} as Reply });
 async function loadReplies(current = 1, pageSize = 20) {
-  const res = await get<{ data: Reply[]; total: number }>(`/api/reply/list?current=${current}&pageSize=${pageSize}`);
-  replies.rows = res.data || [];
-  replies.total = res.total || 0;
+  const res = await get<ApiEnvelope<{ list: Reply[]; total: number }>>(`/api/reply/list?current=${current}&pageSize=${pageSize}`);
+  const data = apiData(res);
+  replies.rows = data?.list || [];
+  replies.total = data?.total || 0;
 }
 function openReply(row?: Reply) {
   replies.editing = row || { id: 0, priority: 0, platforms: [] };
@@ -667,9 +684,10 @@ async function removeReply(row: Reply) {
 
 const masters = reactive({ rows: [] as Master[], platforms: [] as any[], editing: false, form: {} as Master });
 async function loadMasters() {
-  const res = await get<{ data: Master[]; platforms: any[] }>('/api/master/list');
-  masters.rows = res.data || [];
-  masters.platforms = res.platforms || [];
+  const res = await get<ApiEnvelope<{ list: Master[]; platforms: any[] }>>('/api/master/list');
+  const data = apiData(res);
+  masters.rows = data?.list || [];
+  masters.platforms = data?.platforms || [];
 }
 async function saveMaster() {
   await post('/api/master', masters.form);
@@ -685,13 +703,14 @@ async function removeMaster(row: Master) {
 
 const tasks = reactive({ rows: [] as Task[], total: 0, editing: null as Task | null, form: {} as any, scripts: [] as any[] });
 async function loadTasks(current = 1, pageSize = 20) {
-  const res = await get<{ data: Task[]; total: number }>(`/api/tasks?current=${current}&pageSize=${pageSize}`);
-  tasks.rows = res.data || [];
-  tasks.total = res.total || 0;
+  const res = await get<ApiEnvelope<{ list: Task[]; total: number }>>(`/api/tasks?current=${current}&pageSize=${pageSize}`);
+  const data = apiData(res);
+  tasks.rows = data?.list || [];
+  tasks.total = data?.total || 0;
 }
 async function loadTaskSelects(taskId = '') {
-  const res = await get<{ data: { scripts?: Record<string, string> } }>(`/api/task/selects?task_id=${encodeURIComponent(taskId)}`);
-  tasks.scripts = Object.entries(res.data?.scripts || {})
+  const res = await get<ApiEnvelope<{ scripts?: Record<string, string> }>>(`/api/task/selects?task_id=${encodeURIComponent(taskId)}`);
+  tasks.scripts = Object.entries(apiData(res)?.scripts || {})
     .filter(([, label]) => String(label).endsWith('.js'))
     .map(([, label]) => {
       const name = String(label).replace(/\.js$/, '');
@@ -744,15 +763,16 @@ async function runTask(row: Task) {
 
 const carry = reactive({ rows: [] as CarryGroup[], total: 0, editing: null as CarryGroup | null, form: {} as any, selects: {} as any });
 async function loadCarry(current = 1, pageSize = 20) {
-  const res = await get<{ data: CarryGroup[]; total: number }>(`/api/carry/groups?current=${current}&pageSize=${pageSize}`);
-  carry.rows = res.data || [];
-  carry.total = res.total || 0;
+  const res = await get<ApiEnvelope<{ list: CarryGroup[]; total: number }>>(`/api/carry/groups?current=${current}&pageSize=${pageSize}`);
+  const data = apiData(res);
+  carry.rows = data?.list || [];
+  carry.total = data?.total || 0;
 }
 async function loadCarrySelects(row?: CarryGroup) {
-  const res = await get<{ data: any }>(
+  const res = await get<ApiEnvelope<any>>(
     `/api/carry/group_selects?chat_id=${encodeURIComponent(row?.chat_id || '')}&platform=${encodeURIComponent(row?.platform || '')}`,
   );
-  carry.selects = res.data || {};
+  carry.selects = apiData(res) || {};
 }
 async function changeCarryPlatform(platform: string) {
   carry.form.platform = platform;
@@ -808,9 +828,10 @@ const qinglong = reactive({
 async function loadQinglongPanels() {
   qinglong.loading = true;
   try {
-    const res = await get<{ data: QinglongPanel[]; total: number }>('/api/qinglong/panels');
-    qinglong.rows = res.data || [];
-    qinglong.total = res.total || 0;
+    const res = await get<ApiEnvelope<{ list: QinglongPanel[]; total: number }>>('/api/qinglong/panels');
+    const data = apiData(res);
+    qinglong.rows = data?.list || [];
+    qinglong.total = data?.total || 0;
   } finally {
     qinglong.loading = false;
   }
@@ -862,9 +883,10 @@ const smallcat = reactive({
 async function loadSmallcatPanels() {
   smallcat.loading = true;
   try {
-    const res = await get<{ data: SmallcatPanel[]; total: number }>('/api/smallcat/panels');
-    smallcat.rows = res.data || [];
-    smallcat.total = res.total || 0;
+    const res = await get<ApiEnvelope<{ list: SmallcatPanel[]; total: number }>>('/api/smallcat/panels');
+    const data = apiData(res);
+    smallcat.rows = data?.list || [];
+    smallcat.total = data?.total || 0;
   } finally {
     smallcat.loading = false;
   }
@@ -916,9 +938,10 @@ const daidai = reactive({
 async function loadDaidaiPanels() {
   daidai.loading = true;
   try {
-    const res = await get<{ data: DaidaiPanel[]; total: number }>('/api/daidai/panels');
-    daidai.rows = res.data || [];
-    daidai.total = res.total || 0;
+    const res = await get<ApiEnvelope<{ list: DaidaiPanel[]; total: number }>>('/api/daidai/panels');
+    const data = apiData(res);
+    daidai.rows = data?.list || [];
+    daidai.total = data?.total || 0;
   } finally {
     daidai.loading = false;
   }
@@ -969,9 +992,6 @@ const plugins = reactive({
   sources: [] as string[],
   sourceAddress: '',
   sourceSaving: false,
-  githubProxy: '',
-  githubProxyOptions: [] as string[],
-  githubProxySaving: false,
   sourceModal: false,
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
@@ -1005,36 +1025,14 @@ function pluginClassTags(row: PluginInfo) {
 }
 async function openPluginSourceManager() {
   plugins.sourceModal = true;
-  await Promise.all([loadPluginSources(), loadGithubProxy()]);
+  await loadPluginSources();
 }
 async function loadPluginSources() {
   try {
-    const res = await get<{ data: string[] }>('/api/plugins/sources');
-    plugins.sources = res.data || [];
+    const res = await get<ApiEnvelope<string[]>>('/api/plugins/sources');
+    plugins.sources = apiData(res) || [];
   } catch {
     plugins.sources = [];
-  }
-}
-async function loadGithubProxy() {
-  try {
-    const res = await get<{ data: { proxy: string; options: string[] } }>('/api/plugins/github-proxy');
-    plugins.githubProxy = res.data?.proxy || '';
-    plugins.githubProxyOptions = res.data?.options || [];
-  } catch {
-    plugins.githubProxy = '';
-    plugins.githubProxyOptions = [];
-  }
-}
-async function saveGithubProxy() {
-  plugins.githubProxySaving = true;
-  try {
-    const res = await put<{ data?: { proxy?: string } }>('/api/plugins/github-proxy', { proxy: plugins.githubProxy.trim() });
-    plugins.githubProxy = res.data?.proxy || '';
-    message.success(plugins.githubProxy ? '加速链接已生成' : 'GitHub 加速已关闭');
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : 'GitHub 代理保存失败');
-  } finally {
-    plugins.githubProxySaving = false;
   }
 }
 async function loadPlugins(current = 1, pageSize = 12) {
@@ -1047,10 +1045,11 @@ async function loadPlugins(current = 1, pageSize = 12) {
       keyword: plugins.keyword,
       class: plugins.klass,
     });
-    const res = await get<any>(`/api/plugins/list.json?${params.toString()}`);
-    plugins.rows = res.data || [];
-    plugins.total = res.total || 0;
-    plugins.meta = res;
+    const res = await get<ApiEnvelope<any>>(`/api/plugins/list.json?${params.toString()}`);
+    const data = apiData(res) || {};
+    plugins.rows = data.data || data.list || [];
+    plugins.total = data.total || 0;
+    plugins.meta = data;
   } finally {
     plugins.loading = false;
   }
@@ -1063,10 +1062,11 @@ async function addPluginSource() {
   }
   plugins.sourceSaving = true;
   try {
-    const res = await post<{ data?: { count?: number } }>('/api/plugins/source', { address });
+    const res = await post<ApiEnvelope<{ count?: number }>>('/api/plugins/source', { address });
+    const data = apiData(res);
     plugins.sourceAddress = '';
     plugins.tab = 'all';
-    message.success(`插件源已新增${res.data?.count ? `，发现 ${res.data.count} 个插件` : ''}`);
+    message.success(`插件源已新增${data?.count ? `，发现 ${data.count} 个插件` : ''}`);
     await Promise.all([loadPluginSources(), loadPlugins(1)]);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件源新增失败');
@@ -1089,14 +1089,15 @@ async function removePluginSource(address: string) {
 async function installPlugin(row: PluginInfo) {
   plugins.installing[row.id] = true;
   try {
-    const res = await put<{ success: boolean; errors?: Record<string, string>; messages?: Record<string, string> }>('/api/storage', {
+    const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/storage', {
       [`plugins.${row.id}`]: 'install',
     });
-    const firstError = Object.values(res.errors || {}).find(Boolean);
+    const data = apiData(res) || {};
+    const firstError = Object.values(data.errors || {}).find(Boolean);
     if (firstError) {
       throw new ApiError(200, firstError);
     }
-    const firstMessage = Object.values(res.messages || {}).find(Boolean);
+    const firstMessage = Object.values(data.messages || {}).find(Boolean);
     message.success(firstMessage || (row.status === 1 ? '已更新' : '已安装'));
     await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
   } catch (error) {
@@ -1151,7 +1152,6 @@ const nodeDeps = reactive({
   dev: false,
   loading: false,
   saving: false,
-  savingRegistry: false,
   removing: {} as Record<string, boolean>,
   pnpm: { available: false, path: '', message: '', registry: '' } as { available: boolean; path?: string; message?: string; registry?: string },
 });
@@ -1159,25 +1159,15 @@ async function loadNodeDependencies(plugin = '') {
   nodeDeps.loading = true;
   try {
     const query = plugin ? `?plugin=${encodeURIComponent(plugin)}` : '';
-    const res = await get<{ data: { plugins: NodeDependencyPlugin[]; plugin: string; dependencies: NodeDependencyRow[]; pnpm: typeof nodeDeps.pnpm } }>(`/api/node/dependencies${query}`);
-    nodeDeps.plugins = res.data.plugins || [];
-    nodeDeps.plugin = res.data.plugin || '';
-    nodeDeps.rows = res.data.dependencies || [];
-    nodeDeps.pnpm = res.data.pnpm || { available: false };
+    const res = await get<ApiEnvelope<{ plugins: NodeDependencyPlugin[]; plugin: string; dependencies: NodeDependencyRow[]; pnpm: typeof nodeDeps.pnpm }>>(`/api/node/dependencies${query}`);
+    const data = apiData(res) || {};
+    nodeDeps.plugins = data.plugins || [];
+    nodeDeps.plugin = data.plugin || '';
+    nodeDeps.rows = data.dependencies || [];
+    nodeDeps.pnpm = data.pnpm || { available: false };
     nodeDeps.registry = nodeDeps.pnpm.registry || 'https://registry.npmmirror.com';
   } finally {
     nodeDeps.loading = false;
-  }
-}
-async function saveNodeDependencyRegistry() {
-  nodeDeps.savingRegistry = true;
-  try {
-    const res = await put<{ data: { registry: string } }>('/api/node/dependency/registry', { registry: nodeDeps.registry });
-    nodeDeps.registry = res.data?.registry || nodeDeps.registry;
-    nodeDeps.pnpm.registry = nodeDeps.registry;
-    message.success('pnpm 镜像已保存');
-  } finally {
-    nodeDeps.savingRegistry = false;
   }
 }
 async function installNodeDependency() {
@@ -1248,8 +1238,8 @@ const pluginConfigOptions = computed(() =>
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
-    const res = await get<{ data: any[] }>('/api/plugin/configs');
-    pluginConfigs.rows = res.data || [];
+    const res = await get<ApiEnvelope<any[]>>('/api/plugin/configs');
+    pluginConfigs.rows = apiData(res) || [];
     if (pluginConfigs.selected) {
       const next = pluginConfigs.rows.find((item) => item.uuid === pluginConfigs.selected?.uuid);
       if (next) openPluginConfig(next);
@@ -1314,7 +1304,7 @@ async function putPluginConfig(uuid: string, value: Record<string, any>) {
   await put('/api/plugin/config', { uuid, value });
 }
 
-const settings = reactive({ form: {} as any });
+const settings = reactive({ form: {} as any, githubProxyOptions: [] as string[] });
 const storageBackendOptions = [
   { label: 'BoltDB', value: 'boltdb' },
   { label: 'Redis', value: 'redis' },
@@ -1332,8 +1322,15 @@ const settingsKeys = [
   'sillyGirl.redis_password',
 ];
 async function loadSettings() {
-  const res = await readStorage<Record<string, any>>(settingsKeys.join(','));
-  const data = res.data || {};
+  const [res, githubProxyRes, pnpmRegistryRes] = await Promise.all([
+    readStorage<Record<string, any>>(settingsKeys.join(',')),
+    get<ApiEnvelope<{ proxy: string; options: string[] }>>('/api/plugins/github-proxy').catch(() => ({ data: { proxy: '', options: [] } })),
+    get<ApiEnvelope<{ registry: string }>>('/api/node/dependency/registry').catch(() => ({ data: { registry: 'https://registry.npmmirror.com' } })),
+  ]);
+  const data = apiData(res) || {};
+  const githubProxyData = apiData(githubProxyRes) || { proxy: '', options: [] };
+  const pnpmRegistryData = apiData(pnpmRegistryRes) || { registry: 'https://registry.npmmirror.com' };
+  settings.githubProxyOptions = githubProxyData.options || [];
   settings.form = {
     name: data['sillyGirl.name'],
     password: '',
@@ -1345,6 +1342,8 @@ async function loadSettings() {
     storage: data['sillyGirl.storage'] === 'redis' ? 'redis' : 'boltdb',
     redis_addr: data['sillyGirl.redis_addr'],
     redis_password: data['sillyGirl.redis_password'],
+    github_proxy: githubProxyData.proxy || '',
+    pnpm_registry: pnpmRegistryData.registry || 'https://registry.npmmirror.com',
   };
 }
 async function saveSettings() {
@@ -1362,6 +1361,14 @@ async function saveSettings() {
   };
   if (v.password) updates['sillyGirl.password'] = v.password;
   await saveStorage(updates);
+  const [githubProxyRes, pnpmRegistryRes] = await Promise.all([
+    put<ApiEnvelope<{ proxy?: string }>>('/api/plugins/github-proxy', { proxy: String(v.github_proxy || '').trim() }),
+    put<ApiEnvelope<{ registry?: string }>>('/api/node/dependency/registry', { registry: String(v.pnpm_registry || '').trim() }),
+  ]);
+  settings.form.github_proxy = apiData(githubProxyRes)?.proxy || '';
+  settings.form.pnpm_registry = apiData(pnpmRegistryRes)?.registry || settings.form.pnpm_registry;
+  nodeDeps.registry = settings.form.pnpm_registry;
+  nodeDeps.pnpm.registry = settings.form.pnpm_registry;
   message.success('设置已保存');
   loadUser();
 }
@@ -1374,16 +1381,16 @@ const messageBuckets = {
 const msgState = reactive({ active: 'listen' as keyof typeof messageBuckets, rows: [] as any[], editing: null as any, form: {} as any, platforms: [] as any[] });
 async function loadMessages() {
   const bucket = messageBuckets[msgState.active].bucket;
-  const res = await get<{ data: any[] }>(`/api/storage/list?keys=${bucket}`);
-  msgState.rows = (res.data || []).map((row) => {
+  const res = await get<ApiEnvelope<{ list: any[] }>>(`/api/storage/list?keys=${bucket}`);
+  msgState.rows = (apiData(res)?.list || []).map((row) => {
     try {
       return { ...row, ...JSON.parse(row.value || '{}') };
     } catch {
       return row;
     }
   });
-  const master = await get<{ platforms?: any[] }>('/api/master/list').catch(() => ({ platforms: [] }));
-  msgState.platforms = master.platforms || [];
+  const master = await get<ApiEnvelope<{ platforms?: any[] }>>('/api/master/list').catch(() => ({ data: { platforms: [] } }));
+  msgState.platforms = apiData(master)?.platforms || [];
 }
 function openMessage(row?: any) {
   msgState.editing = row || { key: '', enable: true };
@@ -1632,6 +1639,7 @@ function recordOptions(record?: Record<string, string>) {
               <div class="toolbar">
                 <div class="toolbar-left">
                   <Typography.Text class="muted">共 {{ nodeDeps.plugins.length }} 个 NodeJS 脚本插件，依赖共享到 /data/plugins/node_modules</Typography.Text>
+                  <Typography.Text class="muted">pnpm 镜像：{{ nodeDeps.registry }}</Typography.Text>
                   <Typography.Text v-if="nodeDeps.pnpm.message" type="danger">{{ nodeDeps.pnpm.message }}</Typography.Text>
                 </div>
                 <div class="toolbar-right">
@@ -1649,12 +1657,6 @@ function recordOptions(record?: Record<string, string>) {
                 <Button type="primary" :disabled="!nodeDeps.pnpm.available" :loading="nodeDeps.saving" @click="installNodeDependency">
                   <template #icon><Download :size="16" /></template>安装依赖
                 </Button>
-                <Space.Compact>
-                  <Input v-model:value="nodeDeps.registry" style="width: 300px" placeholder="pnpm 镜像地址" @press-enter="saveNodeDependencyRegistry" />
-                  <Button :loading="nodeDeps.savingRegistry" @click="saveNodeDependencyRegistry">
-                    <template #icon><Save :size="16" /></template>保存镜像
-                  </Button>
-                </Space.Compact>
               </div>
               <Table :row-key="(row:any) => `${row.plugin}.${row.name}`" :loading="nodeDeps.loading" :data-source="nodeDeps.rows" :pagination="{ pageSize: 20 }">
                 <Table.Column title="#" :width="64">
@@ -2071,6 +2073,19 @@ function recordOptions(record?: Record<string, string>) {
                   <Form.Item label="Redis 地址"><Input v-model:value="settings.form.redis_addr" placeholder="127.0.0.1:6379" /></Form.Item>
                   <Form.Item label="Redis 密码"><Input.Password v-model:value="settings.form.redis_password" /></Form.Item>
                 </template>
+                <Typography.Title :level="5">网络与镜像</Typography.Title>
+                <Form.Item label="GitHub 加速" extra="用于读取 GitHub 插件源和下载 GitHub 插件；选择关闭表示直连。">
+                  <Select
+                    v-model:value="settings.form.github_proxy"
+                    :options="[
+                      { value: '', label: '关闭加速' },
+                      ...settings.githubProxyOptions.map((value) => ({ value, label: value })),
+                    ]"
+                  />
+                </Form.Item>
+                <Form.Item label="pnpm 镜像" extra="用于安装和更新脚本插件的 NodeJS 依赖。">
+                  <Input v-model:value="settings.form.pnpm_registry" placeholder="https://registry.npmmirror.com" />
+                </Form.Item>
                 <Form.Item label="调试模式"><Switch v-model:checked="settings.form.debug" /></Form.Item>
                 <Form.Item label="未监听群允许管理员触发"><Switch v-model:checked="settings.form.listen_admin" /></Form.Item>
                 <Button type="primary" @click="saveSettings"><template #icon><Save :size="16" /></template>保存设置</Button>
@@ -2157,21 +2172,6 @@ function recordOptions(record?: Record<string, string>) {
       <Modal :open="plugins.sourceModal" title="管理插件源" width="820px" :footer="null" @cancel="plugins.sourceModal = false">
         <Space direction="vertical" style="width: 100%" size="middle">
           <Form layout="vertical">
-            <Form.Item label="GitHub 加速" extra="用于读取 GitHub 插件源和下载 GitHub 插件；选择关闭表示直连。" style="margin-bottom: 12px">
-              <Space.Compact style="width: 100%">
-                <Select
-                  v-model:value="plugins.githubProxy"
-                  style="width: 100%"
-                  :options="[
-                    { value: '', label: '关闭加速' },
-                    ...plugins.githubProxyOptions.map((value) => ({ value, label: value })),
-                  ]"
-                />
-                <Button :loading="plugins.githubProxySaving" @click="saveGithubProxy">
-                  保存
-                </Button>
-              </Space.Compact>
-            </Form.Item>
             <Form.Item label="新增插件源" required style="margin-bottom: 0">
               <Space.Compact style="width: 100%">
                 <Input

@@ -44,11 +44,14 @@ export async function request<T>(url: string, options: RequestOptions = {}): Pro
   });
   const contentType = res.headers.get('content-type') || '';
   const data = contentType.includes('application/json') ? await res.json() : await res.text();
+  const errorText = typeof data === 'string'
+    ? data
+    : data?.message || data?.errorMessage || data?.msg || data?.error || res.statusText || '请求失败';
   if (!res.ok) {
-    throw new ApiError(res.status, typeof data === 'string' ? data : data?.errorMessage || res.statusText);
+    throw new ApiError(res.status, errorText);
   }
-  if (!options.raw && data && typeof data === 'object' && data.success === false) {
-    throw new ApiError(200, data.errorMessage || '请求失败');
+  if (!options.raw && data && typeof data === 'object' && (data.status === false || data.success === false)) {
+    throw new ApiError(200, errorText);
   }
   return data as T;
 }
@@ -80,16 +83,17 @@ export function del<T>(url: string, data?: unknown) {
 
 export async function saveStorage(updates: Record<string, unknown>, uuid?: string) {
   const query = uuid ? `?uuid=${encodeURIComponent(uuid)}` : '';
-  const res = await put<{ success: boolean; messages?: Record<string, string>; errors?: Record<string, string> }>(
+  const res = await put<{ data?: { messages?: Record<string, string>; errors?: Record<string, string>; changes?: Record<string, boolean> }; messages?: Record<string, string>; errors?: Record<string, string> }>(
     `/api/storage${query}`,
     updates,
   );
-  const errors = res.errors || {};
+  const payload = res.data || res;
+  const errors = payload.errors || {};
   const firstError = Object.values(errors).find(Boolean);
   if (firstError) {
     throw new ApiError(200, firstError);
   }
-  const firstMessage = Object.values(res.messages || {}).find(Boolean);
+  const firstMessage = Object.values(payload.messages || {}).find(Boolean);
   if (firstMessage) {
     message.info(firstMessage);
   }
@@ -97,5 +101,5 @@ export async function saveStorage(updates: Record<string, unknown>, uuid?: strin
 }
 
 export function readStorage<T = Record<string, unknown>>(keys: string) {
-  return get<{ success: boolean; data: T }>(`/api/storage?keys=${encodeURIComponent(keys)}`);
+  return get<{ status: boolean; message: string; data: T }>(`/api/storage?keys=${encodeURIComponent(keys)}`);
 }

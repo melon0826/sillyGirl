@@ -68,12 +68,7 @@ func init() {
 		data := []map[string]string{}
 		arr := strings.Split(keys, ",")
 		if keys == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success": true,
-				"data":    data,
-				"page":    page,
-				"total":   len(data),
-			})
+			ApiList(ctx, data, len(data), map[string]interface{}{"page": page})
 			return
 		}
 		for _, bk := range arr {
@@ -115,12 +110,7 @@ func init() {
 			res[i]["index"] = fmt.Sprint(index)
 			index++
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    res,
-			"page":    page,
-			"total":   len(data),
-		})
+		ApiList(ctx, res, len(data), map[string]interface{}{"page": page})
 	})
 	GinApi(GET, "/api/storage", RequireAuth, func(ctx *gin.Context) {
 		keys := ctx.Query("keys")
@@ -138,10 +128,7 @@ func init() {
 						"text":  "[桶] " + bucket,
 					})
 				}
-				ctx.JSON(200, map[string]interface{}{
-					"success": true,
-					"data":    res,
-				})
+				ApiOK(ctx, res)
 				return
 			}
 			for _, bucket := range buckets {
@@ -177,10 +164,7 @@ func init() {
 				})
 			}
 
-			ctx.JSON(200, map[string]interface{}{
-				"success": true,
-				"data":    res,
-			})
+			ApiOK(ctx, res)
 			return
 		}
 		data := map[string]interface{}{}
@@ -209,10 +193,7 @@ func init() {
 				})
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    data,
-		})
+		ApiOK(ctx, data)
 	})
 	GinApi(PUT, "/api/storage", RequireAuth, func(ctx *gin.Context) {
 		uuid := ctx.Query("uuid")
@@ -230,21 +211,13 @@ func init() {
 		}
 		data, err := ioutil.ReadAll(ctx.Request.Body)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-				"showType":     2,
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		updates := map[string]interface{}{}
 		err = json.Unmarshal(data, &updates)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-				"showType":     2,
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		messages := map[string]interface{}{}
@@ -289,8 +262,7 @@ func init() {
 				}
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success":  true,
+		ApiOK(ctx, map[string]interface{}{
 			"messages": messages,
 			"errors":   errors,
 			"changes":  changes,
@@ -299,39 +271,39 @@ func init() {
 	GinApi(POST, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		name, err := normalizeStorageBucketName(req.Bucket)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		for _, bucket := range sillyGirl.Buckets() {
 			if bucket == name {
-				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "存储桶已存在"})
+				ApiFail(ctx, "存储桶已存在")
 				return
 			}
 		}
 		if _, _, err := MakeBucket(name).Set2(storageBucketMarkerKey, "1"); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 	GinApi(DELETE, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		name, err := normalizeStorageBucketName(req.Bucket)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if message, ok := protectedStorageBuckets[name]; ok {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": message})
+			ApiFail(ctx, message)
 			return
 		}
 		found := false
@@ -342,13 +314,13 @@ func init() {
 			}
 		}
 		if !found {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": "存储桶不存在"})
+			ApiFail(ctx, "存储桶不存在")
 			return
 		}
 		if err := MakeBucket(name).Delete(); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 }

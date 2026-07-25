@@ -24,25 +24,16 @@ type PluginConfigRecord struct {
 
 func init() {
 	GinApi(GET, "/api/plugin/configs", RequireAuth, func(ctx *gin.Context) {
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    getPluginConfigRecords(),
-		})
+		ApiOK(ctx, getPluginConfigRecords())
 	})
 	GinApi(GET, "/api/plugin/config", RequireAuth, func(ctx *gin.Context) {
 		uuid := ctx.Query("uuid")
 		record := getPluginConfigRecord(uuid)
 		if record == nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "配置不存在，请先运行一次插件或声明 SillyGirlPluginConfig",
-			})
+			ApiFail(ctx, "配置不存在，请先运行一次插件或声明 SillyGirlPluginConfig")
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data":    record,
-		})
+		ApiOK(ctx, record)
 	})
 	GinApi(PUT, "/api/plugin/config", RequireAuth, func(ctx *gin.Context) {
 		var req struct {
@@ -50,23 +41,15 @@ func init() {
 			Value map[string]interface{} `json:"value"`
 		}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if req.UUID == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "缺少插件 UUID",
-			})
+			ApiFail(ctx, "缺少插件 UUID")
 			return
 		}
 		SetBucketKeyValue(pluginConfigValues, req.UUID, req.Value)
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 }
 

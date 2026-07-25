@@ -22,11 +22,10 @@ var tasks = MakeBucket("tasks")
 const pluginCronTaskPrefix = "plugin-cron:"
 
 type TasksResult struct {
-	Success bool      `json:"success"`
-	Data    []*Tasks  `json:"data"`
-	Page    int       `json:"page"`
-	Total   int       `json:"total"`
-	Time    time.Time `json:"time"`
+	Data  []*Tasks  `json:"data"`
+	Page  int       `json:"page"`
+	Total int       `json:"total"`
+	Time  time.Time `json:"time"`
 }
 
 type Sender struct {
@@ -234,9 +233,7 @@ func init() {
 	GinApi(GET, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
 		current := utils.Int(ctx.Query("current"))
 		pageSize := utils.Int(ctx.Query("pageSize"))
-		rr := TasksResult{
-			Success: true,
-		}
+		rr := TasksResult{}
 		rows := append([]*Tasks{}, pts...)
 		rows = append(rows, pluginCronTasks()...)
 		for i := range rows {
@@ -246,6 +243,8 @@ func init() {
 		if current == 0 {
 			current = 1
 		}
+		rr.Page = current
+		rr.Time = time.Now()
 		if pageSize == 0 {
 			pageSize = 20
 		}
@@ -274,17 +273,14 @@ func init() {
 				}
 			}
 		}
-		ctx.JSON(200, rr)
+		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
 	GinApi(POST, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		task_id := strings.TrimSpace(fmt.Sprint(updateData["task_id"]))
@@ -309,10 +305,7 @@ func init() {
 				if v, ok := value.(string); ok {
 					tp.Schedule = strings.TrimSpace(v)
 					if err := validateTaskSchedule(tp.Schedule); err != nil {
-						ctx.JSON(200, map[string]interface{}{
-							"success":      false,
-							"errorMessage": err.Error(),
-						})
+						ApiFail(ctx, err.Error())
 						return
 					}
 				}
@@ -320,10 +313,7 @@ func init() {
 				ss := []Sender{}
 				err := json.Unmarshal(utils.JsonMarshal(value), &ss)
 				if err != nil {
-					ctx.JSON(200, map[string]interface{}{
-						"success":      false,
-						"errorMessage": "Senders错误：" + err.Error(),
-					})
+					ApiFail(ctx, "Senders错误："+err.Error())
 					return
 				}
 				tp.Senders = ss
@@ -350,82 +340,53 @@ func init() {
 			tp.CreatedAt = int(time.Now().Unix())
 		}
 		if tp.Title == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "定时任务标题不能为空",
-			})
+			ApiFail(ctx, "定时任务标题不能为空")
 			return
 		}
 		if err := validateTaskSchedule(tp.Schedule); err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if f, platform := findNodeFunctionByTask(task_id, tp.Command); f != nil {
 			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
-				ctx.JSON(200, map[string]interface{}{
-					"success":      false,
-					"errorMessage": err.Error(),
-				})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			if task_id != "" {
 				tasks.Set(task_id, "")
 			}
-			ctx.JSON(200, map[string]interface{}{
-				"success": true,
-			})
+			ApiOK(ctx, nil)
 			return
 		}
 		tasks.Set(task_id, utils.JsonMarshal(tp))
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 	GinApi(DELETE, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
 		pt := &Tasks{}
 		err := ctx.BindJSON(pt)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if pt.ID == "" {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "任务ID不为空",
-			})
+			ApiFail(ctx, "任务ID不为空")
 			return
 		}
 		if f, platform := findNodeFunctionByTask(pt.ID, pt.Command); f != nil {
 			if err := updatePluginCronAnnotation(f, platform, ""); err != nil {
-				ctx.JSON(200, map[string]interface{}{
-					"success":      false,
-					"errorMessage": err.Error(),
-				})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			tasks.Set(pt.ID, "")
-			ctx.JSON(200, map[string]interface{}{
-				"success": true,
-			})
+			ApiOK(ctx, nil)
 			return
 		}
 		tasks.Set(pt.ID, "")
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 	GinApi(GET, "/api/task/selects", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}
@@ -489,14 +450,11 @@ func init() {
 		for _, plt := range getPltsArray() {
 			platforms[plt] = GetAdapterBotsID(plt)
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"scripts":     scripts,
-				"platforms":   platforms,
-				"user_names":  user_names,
-				"group_names": group_names,
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"scripts":     scripts,
+			"platforms":   platforms,
+			"user_names":  user_names,
+			"group_names": group_names,
 		})
 	})
 	GinApi(GET, "/api/tasks/run", RequireAuth, func(ctx *gin.Context) {
@@ -506,9 +464,7 @@ func init() {
 				pt.Handle()
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 
 }

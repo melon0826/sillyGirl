@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -121,10 +122,7 @@ func init() {
 		}
 		if ctt != "" {
 			if !isAdmin && !core.MakeBucket("sillyGirl").GetBool("web_chat_public") {
-				ctx.JSON(401, map[string]interface{}{
-					"success":      false,
-					"errorMessage": "web_chat 未开启匿名消息发送",
-				})
+				core.ApiError(ctx, http.StatusUnauthorized, "web_chat 未开启匿名消息发送")
 				return
 			}
 			adapter.Receive(map[string]interface{}{
@@ -160,7 +158,7 @@ func init() {
 				break
 			}
 		}
-		ctx.JSON(200, msgs)
+		core.ApiOK(ctx, msgs)
 	})
 }
 

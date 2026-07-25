@@ -39,9 +39,8 @@ func init() {
 				i++
 			}
 		}
-		c.JSON(200, map[string]interface{}{
-			"success":   true,
-			"data":      ms,
+		ApiOK(c, map[string]interface{}{
+			"list":      ms,
 			"platforms": getPltsLabel(),
 		})
 	})
@@ -49,10 +48,7 @@ func init() {
 		m := Master{}
 		c.BindJSON(&m)
 		if m.ID == "" {
-			c.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "缺少号码字段",
-			})
+			ApiFail(c, "缺少号码字段")
 			return
 		}
 		if m.Platform == "" {
@@ -63,28 +59,20 @@ func init() {
 			}
 		}
 		if m.Platform == "" {
-			c.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "缺少平台字段",
-			})
+			ApiFail(c, "缺少平台字段")
 			return
 		}
 		v := MakeBucket(m.Platform)
 		masters := strings.Split(v.GetString("masters"), "&")
 		v.Set("masters", strings.Join(utils.Unique(masters, m.ID), "&"))
 
-		c.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(c, nil)
 	})
 	GinApi(DELETE, "/api/master", RequireAuth, func(c *gin.Context) {
 		m := Master{}
 		c.BindJSON(&m)
 		if m.ID == "" {
-			c.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "缺少账号字段",
-			})
+			ApiFail(c, "缺少账号字段")
 			return
 		}
 		if m.Platform == "" {
@@ -95,18 +83,13 @@ func init() {
 			}
 		}
 		if m.Platform == "" {
-			c.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": "缺少平台字段",
-			})
+			ApiFail(c, "缺少平台字段")
 			return
 		}
 		v := MakeBucket(m.Platform)
 		masters := strings.Split(v.GetString("masters"), "&")
 		v.Set("masters", strings.Join(utils.Remove(masters, m.ID), "&"))
 
-		c.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(c, nil)
 	})
 }

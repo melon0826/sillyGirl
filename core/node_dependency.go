@@ -93,24 +93,24 @@ func init() {
 		if pluginName != "" {
 			plugin, err := nodeDependencyPluginByName(plugins, pluginName)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			deps, err := readNodeDependencies(plugin)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			data["dependencies"] = deps
 		} else {
 			rows, err := readSharedNodeDependencies(plugins)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			data["dependencies"] = rows
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": data})
+		ApiOK(ctx, data)
 	})
 
 	GinApi(PUT, "/api/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
@@ -118,67 +118,76 @@ func init() {
 			Registry string `json:"registry"`
 		}{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		registry, err := normalizePnpmRegistry(req.Registry)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		sillyGirl.Set("pnpm_registry", registry)
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": map[string]string{"registry": registry}})
+		ApiOK(ctx, map[string]string{"registry": registry})
+	})
+
+	GinApi(GET, "/api/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
+		ApiOK(ctx, map[string]string{"registry": pnpmRegistry()})
 	})
 
 	GinApi(POST, "/api/node/dependency", RequireAuth, func(ctx *gin.Context) {
 		req := nodeDependencyRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		output, err := installNodeDependency(req.Plugin, req.Package, req.Dev)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error(), "data": output})
+			message := strings.TrimSpace(err.Error())
+			if strings.TrimSpace(output) != "" {
+				message += "：" + strings.TrimSpace(output)
+			}
+			ApiFail(ctx, message)
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": output})
+		ApiOK(ctx, output)
 	})
 
 	GinApi(DELETE, "/api/node/dependency", RequireAuth, func(ctx *gin.Context) {
 		req := nodeDependencyRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		output, err := removeNodeDependency(req.Plugin, req.Package)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error(), "data": output})
+			message := strings.TrimSpace(err.Error())
+			if strings.TrimSpace(output) != "" {
+				message += "：" + strings.TrimSpace(output)
+			}
+			ApiFail(ctx, message)
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true, "data": output})
+		ApiOK(ctx, output)
 	})
 
 	GinApi(GET, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
 		id := strings.TrimSpace(ctx.Query("id"))
 		f, err := nodeFunctionByID(id)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		data, err := os.ReadFile(f.Path)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"id":      f.UUID,
-				"name":    f.Title,
-				"plugin":  nodePluginNameFromPath(f.Path),
-				"path":    f.Path,
-				"content": string(data),
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"id":      f.UUID,
+			"name":    f.Title,
+			"plugin":  nodePluginNameFromPath(f.Path),
+			"path":    f.Path,
+			"content": string(data),
 		})
 	})
 
@@ -187,7 +196,7 @@ func init() {
 		_ = ctx.BindJSON(&req)
 		fileName, err := normalizeNodeScriptFileName(req.Name)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
@@ -195,73 +204,70 @@ func init() {
 		fileName = pluginName + ".js"
 		_, index, err := createNodePlugin(pluginName, title, fileName)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := AddNodePlugin(strings.ReplaceAll(index, "\\", "/"), pluginName, NODE); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-			"data": map[string]interface{}{
-				"id":     nameUuid(pluginName),
-				"plugin": pluginName,
-				"path":   index,
-				"file":   filepath.Base(index),
-			},
+		ApiOK(ctx, map[string]interface{}{
+			"id":     nameUuid(pluginName),
+			"plugin": pluginName,
+			"path":   index,
+			"file":   filepath.Base(index),
 		})
 	})
 
 	GinApi(PUT, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		f, err := nodeFunctionByID(req.ID)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := os.WriteFile(path, []byte(req.Content), 0644); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), NODE); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 
 	GinApi(DELETE, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		f, err := nodeFunctionByID(req.ID)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		path, err := checkedNodeScriptPath(f.Path)
 		if err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		if err := removeNodePluginScript(path); err != nil {
-			ctx.JSON(200, map[string]interface{}{"success": false, "errorMessage": err.Error()})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		AddNodePlugin(strings.ReplaceAll(path, "\\", "/"), nodePluginNameFromPath(path), UNKNOWN)
-		ctx.JSON(200, map[string]interface{}{"success": true})
+		ApiOK(ctx, nil)
 	})
 }
 

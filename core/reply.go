@@ -96,11 +96,8 @@ func init() {
 				}
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success":   true,
-			"data":      paginatedReplies,
+		ApiList(ctx, paginatedReplies, len(filteredReplies), map[string]interface{}{
 			"page":      page,
-			"total":     len(filteredReplies),
 			"platforms": getPltsLabel(),
 		})
 	})
@@ -112,10 +109,7 @@ func init() {
 		data, _ := ioutil.ReadAll(ctx.Request.Body)
 		var v = map[string]interface{}{}
 		if err := json.Unmarshal(data, &reply); err != nil {
-			ctx.JSON(200, map[string]interface{}{
-				"success":      false,
-				"errorMessage": err.Error(),
-			})
+			ApiFail(ctx, err.Error())
 			return
 		}
 		json.Unmarshal(data, &v)
@@ -157,20 +151,14 @@ func init() {
 			reply = *existingReply
 			err := REPLY.Create(&reply)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{
-					"success":      false,
-					"errorMessage": err.Error(),
-				})
+				ApiFail(ctx, err.Error())
 				return
 			}
 		} else {
 			reply.CreatedAt = int(time.Now().Unix())
 			err := REPLY.Create(&reply)
 			if err != nil {
-				ctx.JSON(200, map[string]interface{}{
-					"success":      false,
-					"errorMessage": err.Error(),
-				})
+				ApiFail(ctx, err.Error())
 				return
 			}
 			replies = append(replies, reply)
@@ -178,9 +166,7 @@ func init() {
 		sort.Slice(replies, func(i, j int) bool {
 			return replies[i].Priority > replies[j].Priority
 		})
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 	//删除功能
 	GinApi(DELETE, "/api/reply", RequireAuth, func(ctx *gin.Context) {
@@ -194,9 +180,7 @@ func init() {
 				break
 			}
 		}
-		ctx.JSON(200, map[string]interface{}{
-			"success": true,
-		})
+		ApiOK(ctx, nil)
 	})
 }
 
