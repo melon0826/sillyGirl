@@ -129,6 +129,18 @@ s.reply("文本");     // 回复消息
 s.continue();        // 继续匹配后续插件
 ```
 
+推送管理员：
+
+```js
+const { pushAdmin } = require("sillygirl");
+
+await pushAdmin("任务执行完成");
+await pushAdmin("只推送 QQ 管理员", { platform: "qq" });
+await pushAdmin("指定机器人推送", { platform: "qq", botId: "10001" });
+```
+
+`pushAdmin(content, options?)` 会读取对应平台存储桶里的 `masters` 管理员列表；不传 `platform` 时会遍历所有带 `masters` 的平台。
+
 插件配置表单：
 
 ```js
@@ -380,14 +392,13 @@ SillyGirl 侧配置：
 
 | 存储桶 | 键 | 说明 |
 |------|----|------|
-| `qq` | `access_token` | OneBot 反向 WebSocket 的访问密钥，需和 NapCat 的 `accessToken` 一致 |
-| `qq` | `token` | 兼容旧写法；未设置 `access_token` 时读取 |
+| `qq` | `token` | OneBot 反向 WebSocket 的访问密钥，需和 NapCat 的 `accessToken` 一致 |
 | `qq` | `debug` | 可选，设为 `true` 时输出 QQ 收发消息调试日志 |
 
 注意：
 
 - Docker 部署时，如果 NapCat 在宿主机或其他机器上，`url` 不能写容器内部的 `localhost`，要写宿主机 IP、局域网 IP 或域名。
-- 不设置 `qq.access_token` 也能连接，但不安全，公网部署必须设置。
+- 不设置 `qq.token` 也能连接，但不安全，公网部署必须设置。
 - 连接成功后，Admin 面板适配器状态里会看到 `QQ` 在线和当前 bot id。
 
 ### Telegram Bot

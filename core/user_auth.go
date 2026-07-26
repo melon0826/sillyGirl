@@ -23,7 +23,11 @@ var userBucket = MakeBucket("users")
 
 const userJWTExpireSeconds = 86400 * 30
 
-var userNamePattern = regexp.MustCompile(`^[A-Za-z0-9_\-.]{3,32}$`)
+var (
+	userNamePattern      = regexp.MustCompile(`^[A-Za-z0-9_\-.]{3,32}$`)
+	userQQBindingPattern = regexp.MustCompile(`^\d{5,12}$`)
+	userTGBindingPattern = regexp.MustCompile(`^-?\d{5,20}$`)
+)
 
 type normalUser struct {
 	ID           string `json:"id"`
@@ -678,12 +682,12 @@ func updateNormalUserBinding(username string, platform string, value string) (no
 	bindings := loadNormalUserBindings(username)
 	switch platform {
 	case "qq":
-		if value != "" && !regexp.MustCompile(`^\d{5,12}$`).MatchString(value) {
+		if value != "" && !userQQBindingPattern.MatchString(value) {
 			return bindings, errors.New("QQ 号格式不正确")
 		}
 		bindings.QQ = value
 	case "telegram", "tg", "tgid":
-		if value != "" && !regexp.MustCompile(`^-?\d{5,20}$`).MatchString(value) {
+		if value != "" && !userTGBindingPattern.MatchString(value) {
 			return bindings, errors.New("Telegram ID 格式不正确")
 		}
 		bindings.Telegram = value

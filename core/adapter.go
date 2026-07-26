@@ -71,6 +71,11 @@ var BotsLocker sync.RWMutex
 
 var ErrNotFind = errors.New("adapter not find")
 
+var (
+	adapterWhitespacePattern     = regexp.MustCompile(`\S+`)
+	adapterCompactNewlinePattern = regexp.MustCompile("[\n]{3,}")
+)
+
 func DestroyAdapterByUUID(uuid string) {
 	// BotsLocker.RLock()
 	// defer BotsLocker.RUnlock()
@@ -104,18 +109,28 @@ func GetAdapter(botplt string, bots_id ...string) (*Factory, error) {
 	var bots = []*Factory{}
 	var select_bots = []*Factory{}
 	var tries = 0
+	hasBotFilter := false
+	for _, id := range bots_id {
+		if strings.TrimSpace(id) != "" {
+			hasBotFilter = true
+			break
+		}
+	}
 Try:
 	func() {
 		BotsLocker.RLock()
 		defer BotsLocker.RUnlock()
 		for i := range Bots {
 			plt, id := i[0], i[1]
-			for j := range bots_id {
-				if plt == botplt && bots_id[j] == id {
-					select_bots = append(select_bots, Bots[i])
-				}
-				if plt == botplt {
-					bots = append(bots, Bots[i])
+			if botplt != "" && plt != botplt {
+				continue
+			}
+			bots = append(bots, Bots[i])
+			if hasBotFilter {
+				for j := range bots_id {
+					if strings.TrimSpace(bots_id[j]) != "" && bots_id[j] == id {
+						select_bots = append(select_bots, Bots[i])
+					}
 				}
 			}
 		}
@@ -133,7 +148,10 @@ Try:
 		return select_bots[i], nil
 	}
 	i := rand.Intn(len(bots))
-	return bots[i], ErrNotFind
+	if hasBotFilter {
+		return bots[i], ErrNotFind
+	}
+	return bots[i], nil
 }
 
 func GetAdapters(botplt string, bots_id ...string) ([]*Factory, error) {
@@ -141,15 +159,24 @@ func GetAdapters(botplt string, bots_id ...string) ([]*Factory, error) {
 	defer BotsLocker.RUnlock()
 	var bots = []*Factory{}
 	var select_bots = []*Factory{}
+	hasBotFilter := false
+	for _, id := range bots_id {
+		if strings.TrimSpace(id) != "" {
+			hasBotFilter = true
+			break
+		}
+	}
 	for i := range Bots {
 		plt, id := i[0], i[1]
-		// fmt.Println("plt", plt, "id", id, botplt, bots_id)
-		for j := range bots_id {
-			if plt == botplt && bots_id[j] == id {
-				select_bots = append(select_bots, Bots[i])
-			}
-			if plt == botplt {
-				bots = append(bots, Bots[i])
+		if botplt != "" && plt != botplt {
+			continue
+		}
+		bots = append(bots, Bots[i])
+		if hasBotFilter {
+			for j := range bots_id {
+				if strings.TrimSpace(bots_id[j]) != "" && bots_id[j] == id {
+					select_bots = append(select_bots, Bots[i])
+				}
 			}
 		}
 	}
@@ -159,7 +186,10 @@ func GetAdapters(botplt string, bots_id ...string) ([]*Factory, error) {
 	if len(select_bots) != 0 {
 		return select_bots, nil
 	}
-	return bots, ErrNotFind
+	if hasBotFilter {
+		return bots, ErrNotFind
+	}
+	return bots, nil
 }
 
 func GetAdapterBotsID(botplt string) []string {
@@ -230,7 +260,7 @@ func (f *Factory) Init(botplt, botid string, params map[string]interface{}) {
 				script: plugins.GetString(f.uuid),
 			}
 			str := su.GetValue("message")
-			ss := regexp.MustCompile(`\S+`).FindAllString(str, -1)
+			ss := adapterWhitespacePattern.FindAllString(str, -1)
 			if len(ss) == 0 {
 				ss = []string{f.botplt}
 			}
@@ -315,7 +345,7 @@ func (f *Factory) Destroy() {
 			if str == "" {
 				return
 			}
-			ss := regexp.MustCompile(`\S+`).FindAllString(str, -1)
+			ss := adapterWhitespacePattern.FindAllString(str, -1)
 			if len(ss) == 0 {
 				return
 			}
@@ -619,7 +649,7 @@ func (sender *CustomSender) Reply(msgs ...interface{}) (string, error) {
 	content = strings.ReplaceAll(content, "\n\r", "\n")
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
-	content = regexp.MustCompile("[\n]{3,}").ReplaceAllString(content, "\n\n")
+	content = adapterCompactNewlinePattern.ReplaceAllString(content, "\n\n")
 	if content != "" {
 		user_id := sender.GetUserID()
 		msg := map[string]interface{}{

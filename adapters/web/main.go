@@ -21,6 +21,11 @@ type WebMessage struct {
 
 var webUsers sync.Map
 
+var (
+	webCQImageFileURLPattern = regexp.MustCompile(`file=[^\[\]]*,url`)
+	webCQImagePattern        = regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`)
+)
+
 func Broadcast2WebUser(content, class string) {
 	webUsers.Range(func(key, value interface{}) bool {
 		wu := value.(*WebUser)
@@ -163,8 +168,8 @@ func init() {
 }
 
 var sendWebMessage = func(message *WebMessage) {
-	message.Content = regexp.MustCompile(`file=[^\[\]]*,url`).ReplaceAllString(message.Content, "file")
-	for _, v := range regexp.MustCompile(`\[CQ:image,file=([^\[\]]+)\]`).FindAllStringSubmatch(message.Content, -1) {
+	message.Content = webCQImageFileURLPattern.ReplaceAllString(message.Content, "file")
+	for _, v := range webCQImagePattern.FindAllStringSubmatch(message.Content, -1) {
 		message.Images = append(message.Images, v[1])
 		message.Content = strings.Replace(message.Content, fmt.Sprintf(`[CQ:image,file=%s]`, v[1]), "", -1)
 	}

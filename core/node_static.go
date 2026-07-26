@@ -2,11 +2,12 @@ package core
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
-	"io/ioutil"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -28,33 +29,65 @@ func FindFile(c *gin.Context) {
 	// 获取文件名
 	filename := c.Param("filename")
 
+	served := false
 	statics.Range(func(_, value any) bool {
-		path := value.(string)
-		// 拼接文件路径
-		filepath := strings.ReplaceAll(filepath.Join(path, filename), "\\/", "\\")
+		staticRoot, ok := value.(string)
+		if !ok {
+			return true
+		}
+		filePath, err := safeStaticFilePath(staticRoot, filename)
+		if err != nil {
+			return true
+		}
 		// 判断文件是否存在
-		_, err := os.Stat(filepath)
-		if err == nil {
-			// 文件存在，读取文件内容并返回
-			file, err := ioutil.ReadFile(filepath)
-			if err != nil {
-				c.AbortWithError(http.StatusInternalServerError, err)
-				return true
-			}
-			// 根据文件类型设置Content-Type
-			contentType := http.DetectContentType(file)
-			c.Header("Content-Type", contentType)
-
-			// 返回文件内容
-			c.Data(http.StatusOK, contentType, file)
+		info, err := os.Stat(filePath)
+		if err == nil && !info.IsDir() {
+			served = true
+			c.File(filePath)
 			return false
-		} else {
+		} else if err != nil {
 			console.Log(err)
 		}
 		return true
 	})
 	// 如果文件不存在，返回404错误
-	c.AbortWithStatus(http.StatusNotFound)
+	if !served && !c.Writer.Written() {
+		c.AbortWithStatus(http.StatusNotFound)
+	}
+}
+
+func safeStaticFilePath(staticRoot string, filename string) (string, error) {
+	staticRoot = strings.TrimSpace(staticRoot)
+	filename = strings.TrimSpace(filename)
+	if staticRoot == "" || filename == "" {
+		return "", errors.New("static root or filename is empty")
+	}
+	normalized := strings.ReplaceAll(filename, "\\", "/")
+	if strings.Contains(normalized, "\x00") || strings.Contains(normalized, ":") || strings.HasPrefix(normalized, "/") {
+		return "", errors.New("invalid static filename")
+	}
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == ".." {
+			return "", errors.New("static filename escapes root")
+		}
+	}
+	cleanName := path.Clean(normalized)
+	if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, "../") {
+		return "", errors.New("invalid static filename")
+	}
+	rootAbs, err := filepath.Abs(filepath.Clean(staticRoot))
+	if err != nil {
+		return "", err
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(filepath.Join(rootAbs, filepath.FromSlash(cleanName))))
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("static filename escapes root")
+	}
+	return targetAbs, nil
 }
 
 // Server.GET("/api/file/:filename", FindFile)

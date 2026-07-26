@@ -85,18 +85,29 @@ type QQ struct {
 func (qq *QQ) WriteJSON(ca CallApi) (string, error) {
 	var err error
 	cy := make(chan string, 1)
-	defer close(cy)
+	echo := ""
 	func() {
 		qq.Lock()
 		defer qq.Unlock()
 		qq.id++
 		ca.Echo = fmt.Sprint(qq.id)
-		qq.chans[ca.Echo] = cy
+		echo = ca.Echo
+		qq.chans[echo] = cy
 		err = qq.conn.WriteJSON(ca)
 	}()
 	if err != nil {
+		qq.Lock()
+		delete(qq.chans, echo)
+		qq.Unlock()
+		close(cy)
 		return "", err
 	}
+	defer func() {
+		qq.Lock()
+		delete(qq.chans, echo)
+		qq.Unlock()
+		close(cy)
+	}()
 	select {
 	case v := <-cy:
 		return v, nil
@@ -106,6 +117,23 @@ func (qq *QQ) WriteJSON(ca CallApi) (string, error) {
 }
 
 var debug = qq.GetBool("debug", false)
+var qqNewlinePattern = regexp.MustCompile(`[\n\r]+`)
+
+func validOneBotAuthorization(auth string, token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return true
+	}
+	auth = strings.TrimSpace(auth)
+	if auth == token {
+		return true
+	}
+	const bearerPrefix = "Bearer "
+	if len(auth) > len(bearerPrefix) && strings.EqualFold(auth[:len(bearerPrefix)], bearerPrefix) {
+		return strings.TrimSpace(auth[len(bearerPrefix):]) == token
+	}
+	return false
+}
 
 func init() {
 	storage.Watch(qq, "debug", func(old, new, key string) *storage.Final {
@@ -124,17 +152,14 @@ func init() {
 	go func() {
 		core.GinApi(core.GET, "/qq/receive", func(c *gin.Context) {
 			auth := c.GetHeader("Authorization")
-			token := qq.GetString("access_token")
-			if token == "" {
-				token = qq.GetString("token")
-			}
-			if token != "" && !strings.Contains(auth, token) {
-				core.Logs.Warn("Onebot机器人access_token不正确，小心有人攻击你的傻妞！！！%s ? %s", token, auth)
+			token := qq.GetString("token")
+			if !validOneBotAuthorization(auth, token) {
+				core.Logs.Warn("OneBot机器人token不正确，小心有人攻击你的傻妞！！！")
 				c.AbortWithStatus(401)
 				return
 			}
 			if token == "" {
-				core.Logs.Warn(`你需要在Onebot机器人配置access_token以及在傻妞配置对应的参数(set qq access_token ?)才能保证连接安全，如果不设置将会造成信息泄露和资产损失！！！`)
+				core.Logs.Warn(`你需要在OneBot机器人配置accessToken以及在傻妞配置对应的参数(set qq token ?)才能保证连接安全，如果不设置将会造成信息泄露和资产损失！！！`)
 			}
 			var upGrader = websocket.Upgrader{
 				CheckOrigin: func(r *http.Request) bool {
@@ -290,7 +315,7 @@ func init() {
 				}
 
 				msg.RawMessage = strings.ReplaceAll(msg.RawMessage, "\\r", "\n")
-				msg.RawMessage = regexp.MustCompile(`[\n\r]+`).ReplaceAllString(msg.RawMessage, "\n")
+				msg.RawMessage = qqNewlinePattern.ReplaceAllString(msg.RawMessage, "\n")
 				content := msg.RawMessage
 				content = strings.Replace(content, "amp;", "", -1)
 				content = strings.Replace(content, "&#91;", "[", -1)

@@ -108,7 +108,7 @@ func (sg *SillyGirlService) AdapterPush(ctx context.Context, req *srpc.AdapterRe
 		}
 		return &srpc.Default{Value: message_id}, nil
 	}
-	return &srpc.Default{Value: ""}, nil
+	return &srpc.Default{Value: ""}, err
 }
 
 func (sg *SillyGirlService) AdapterSender(ctx context.Context, req *srpc.AdapterRequest) (*srpc.Default, error) {

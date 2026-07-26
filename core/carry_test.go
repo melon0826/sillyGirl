@@ -65,6 +65,30 @@ func TestGetAdapterBotsIDReturnsAllWhenPlatformEmpty(t *testing.T) {
 	}
 }
 
+func TestGetAdapterAllowsEmptyBotID(t *testing.T) {
+	BotsLocker.Lock()
+	original := Bots
+	qq := &Factory{botplt: "qq", botid: "10001"}
+	Bots = map[Bot]*Factory{
+		{"qq", "10001"}:       qq,
+		{"telegram", "20002"}: {botplt: "telegram", botid: "20002"},
+	}
+	BotsLocker.Unlock()
+	defer func() {
+		BotsLocker.Lock()
+		Bots = original
+		BotsLocker.Unlock()
+	}()
+
+	got, err := GetAdapter("qq", "")
+	if err != nil {
+		t.Fatalf("GetAdapter with empty bot id returned error: %v", err)
+	}
+	if got != qq {
+		t.Fatalf("GetAdapter with empty bot id = %#v, want qq adapter", got)
+	}
+}
+
 func TestPluginParseCarryMetaWithoutValue(t *testing.T) {
 	fn, _ := pluginParse(`/**
  * @title 搬运处理

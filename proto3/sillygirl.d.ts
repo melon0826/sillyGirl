@@ -231,6 +231,14 @@ interface Message {
     user_name?: string;
     chat_name?: string;
 }
+interface PushAdminOptions {
+    platform?: string | string[];
+    platforms?: string[];
+    botId?: string;
+    bot_id?: string;
+    userIds?: string[];
+    users?: string[];
+}
 declare class Adapter {
     platform: string;
     bot_id: string;
@@ -247,6 +255,13 @@ declare class Adapter {
     sender(options: any): Promise<Sender>;
 }
 declare let sender: Sender;
+declare function pushAdmin(content: string, options?: PushAdminOptions): Promise<{
+    platform: string;
+    bot_id: string;
+    user_id: string;
+    message_id?: string;
+    error?: string;
+}[]>;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
     mode?: string;
@@ -291,4 +306,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, sleep, restart, update, utils, console, express, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console, express, };

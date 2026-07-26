@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -209,7 +209,7 @@ func init() {
 				}
 			}
 		}
-		data, err := ioutil.ReadAll(ctx.Request.Body)
+		data, err := io.ReadAll(ctx.Request.Body)
 		if err != nil {
 			ApiFail(ctx, err.Error())
 			return

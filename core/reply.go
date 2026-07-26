@@ -1,7 +1,7 @@
 package core
 
 import (
-	"io/ioutil"
+	"io"
 	"regexp"
 	"sort"
 	"strconv"
@@ -106,7 +106,7 @@ func init() {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
 		var reply Reply
-		data, _ := ioutil.ReadAll(ctx.Request.Body)
+		data, _ := io.ReadAll(ctx.Request.Body)
 		var v = map[string]interface{}{}
 		if err := json.Unmarshal(data, &reply); err != nil {
 			ApiFail(ctx, err.Error())
