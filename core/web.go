@@ -129,6 +129,13 @@ func initWeb() {
 							return err
 						}
 
+						if info.Mode()&os.ModeSymlink != 0 {
+							if info.IsDir() {
+								return filepath.SkipDir
+							}
+							return nil
+						}
+
 						if info.IsDir() && info.Name() == "node_modules" {
 							return filepath.SkipDir
 						}
@@ -139,12 +146,12 @@ func initWeb() {
 
 						// 将路径转换为相对路径
 						relPath, err := filepath.Rel(dir, path)
+						if err != nil || strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
+							return fmt.Errorf("插件文件路径不合法：%s", path)
+						}
 						is_index := relPath == "main.js"
 
 						relPath = name + "/" + relPath
-						if err != nil {
-							return err
-						}
 
 						file, err := os.Open(path)
 						if err != nil {

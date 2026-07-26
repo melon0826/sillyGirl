@@ -1,12 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -84,6 +84,16 @@ var nodeSillygirlRuntimeDependencies = map[string]string{
 	"google-protobuf": "^3.21.2",
 }
 
+var (
+	jsDocBlockPattern        = regexp.MustCompile(`(?s)/\*\*(.*?)\*/`)
+	pythonDocBlockPattern    = regexp.MustCompile(`(?s)(?:"""|''')(.*?)(?:"""|''')`)
+	dependencyMetaPattern    = regexp.MustCompile(`(?m)^\s*\*\s*@depe\s+(.+?)\s*$`)
+	pythonDependencyPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+	pythonPackageArgPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~*+]*$`)
+	nodePackageArgPattern    = regexp.MustCompile(`^[A-Za-z0-9@._~/-]+$`)
+	unsafePackageNamePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
+)
+
 var pythonPipxRuntimeDependencies = []string{
 	pythonGrpcRuntimeDependency,
 	pythonProtobufRuntimeDependency,
@@ -96,6 +106,26 @@ var nodePnpmOnlyBuiltDependencies = []string{
 var pythonRuntimeEnvCache = struct {
 	sync.Mutex
 	ready bool
+}{}
+
+var nodeRuntimeDependencyCache sync.Map
+var nodeSillygirlModuleCache sync.Map
+var pythonInstalledPackagesCache = struct {
+	sync.Mutex
+	values map[string]string
+	expire time.Time
+}{}
+var pnpmCommandCache = struct {
+	sync.Mutex
+	cmd pnpmCommand
+}{}
+var pipxCommandCache = struct {
+	sync.Mutex
+	cmd pipxCommand
+}{}
+var nodeCommandCache = struct {
+	sync.Mutex
+	bin string
 }{}
 
 func init() {
@@ -1008,11 +1038,11 @@ func nodePluginWorkDir(scriptOrDir string) string {
 
 func parseDeclaredDependencies(content string, runtime string) []string {
 	block := ""
-	if match := regexp.MustCompile(`(?s)/\*\*(.*?)\*/`).FindStringSubmatch(content); len(match) > 1 {
+	if match := jsDocBlockPattern.FindStringSubmatch(content); len(match) > 1 {
 		block = match[1]
 	}
 	if block == "" {
-		if match := regexp.MustCompile(`(?s)(?:"""|''')(.*?)(?:"""|''')`).FindStringSubmatch(content); len(match) > 1 {
+		if match := pythonDocBlockPattern.FindStringSubmatch(content); len(match) > 1 {
 			block = match[1]
 		}
 	}
@@ -1020,7 +1050,7 @@ func parseDeclaredDependencies(content string, runtime string) []string {
 		return nil
 	}
 	values := []string{}
-	matches := regexp.MustCompile(`(?m)^\s*\*\s*@depe\s+(.+?)\s*$`).FindAllStringSubmatch(block, -1)
+	matches := dependencyMetaPattern.FindAllStringSubmatch(block, -1)
 	for _, match := range matches {
 		if len(match) < 2 {
 			continue
@@ -1129,7 +1159,7 @@ func normalizePythonDependencyName(value string) string {
 	if value == "" || pythonIgnoredModules[value] {
 		return ""
 	}
-	if !regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`).MatchString(value) {
+	if !pythonDependencyPattern.MatchString(value) {
 		return ""
 	}
 	return value
@@ -1198,6 +1228,10 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 }
 
 func ensureNodeSillygirlModule(dir string) error {
+	dir = filepath.Clean(dir)
+	if _, ok := nodeSillygirlModuleCache.Load(dir); ok {
+		return nil
+	}
 	nodeModules := filepath.Join(dir, "node_modules")
 	if err := os.MkdirAll(nodeModules, 0755); err != nil {
 		return err
@@ -1212,15 +1246,19 @@ func ensureNodeSillygirlModule(dir string) error {
 	if err := copyNodeRuntimeFile("srpc.js", filepath.Join(moduleDir, "srpc.js")); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(moduleDir, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+	if err := writeFileIfChanged(filepath.Join(moduleDir, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(nodeModules, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
+	if err := writeFileIfChanged(filepath.Join(nodeModules, "sillygirl.d.ts"), []byte(typeat), 0644); err != nil {
 		return err
 	}
 	packageJSON := []byte(`{"name":"sillygirl","main":"index.js","types":"sillygirl.d.ts","private":true}
 `)
-	return os.WriteFile(filepath.Join(moduleDir, "package.json"), packageJSON, 0644)
+	if err := writeFileIfChanged(filepath.Join(moduleDir, "package.json"), packageJSON, 0644); err != nil {
+		return err
+	}
+	nodeSillygirlModuleCache.Store(dir, true)
+	return nil
 }
 
 func copyNodeRuntimeFile(name, target string) error {
@@ -1242,21 +1280,23 @@ func nodeRuntimeSourceCandidates(name string) []string {
 }
 
 func copyFile(source, target string) error {
-	in, err := os.Open(source)
+	data, err := os.ReadFile(source)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	return writeFileIfChanged(target, data, 0644)
+}
+
+func writeFileIfChanged(target string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
-	out, err := os.Create(target)
-	if err != nil {
+	if current, err := os.ReadFile(target); err == nil && bytes.Equal(current, data) {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	return os.WriteFile(target, data, perm)
 }
 
 func nodeSillygirlRuntimeDependencyCopy() map[string]string {
@@ -1362,7 +1402,7 @@ func normalizeNodePackageDependencyField(value interface{}) (map[string]string, 
 
 func safePackageName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
-	name = regexp.MustCompile(`[^a-z0-9._-]+`).ReplaceAllString(name, "-")
+	name = unsafePackageNamePattern.ReplaceAllString(name, "-")
 	name = strings.Trim(name, "-._")
 	if name == "" {
 		return "sillygirl-plugin"
@@ -1378,7 +1418,7 @@ func validateNodePackageArg(pkg string) error {
 	if strings.ContainsAny(pkg, " \t\r\n\\:") || strings.Contains(pkg, "..") || strings.HasPrefix(pkg, "-") {
 		return errors.New("依赖名称不合法")
 	}
-	if !regexp.MustCompile(`^[A-Za-z0-9@._~/-]+$`).MatchString(pkg) {
+	if !nodePackageArgPattern.MatchString(pkg) {
 		return errors.New("依赖名称只能包含字母、数字、@、/、.、_、-、~")
 	}
 	return nil
@@ -1392,7 +1432,7 @@ func validatePythonPackageArg(pkg string) error {
 	if strings.ContainsAny(pkg, " \t\r\n\\/:") || strings.Contains(pkg, "..") || strings.HasPrefix(pkg, "-") {
 		return errors.New("Python 依赖名称不合法")
 	}
-	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._\-\[\],<>=!~*+]*$`).MatchString(pkg) {
+	if !pythonPackageArgPattern.MatchString(pkg) {
 		return errors.New("Python 依赖名称只能包含包名、extras 和版本约束")
 	}
 	if normalizePythonDependencyName(pkg) == "" {
@@ -1416,7 +1456,11 @@ func installNodeDependency(pluginName, pkg string, dev bool) (string, error) {
 	if dev {
 		args = append(args, "-D")
 	}
-	return runPnpm(dir, args...)
+	output, err := runPnpm(dir, args...)
+	if err == nil {
+		invalidateNodeRuntimeDependencyCache(dir)
+	}
+	return output, err
 }
 
 func installPythonDependency(pluginName, pkg string) (string, error) {
@@ -1444,7 +1488,11 @@ func removeNodeDependency(pluginName, pkg string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return runPnpm(dir, "remove", pkg)
+	output, err := runPnpm(dir, "remove", pkg)
+	if err == nil {
+		invalidateNodeRuntimeDependencyCache(dir)
+	}
+	return output, err
 }
 
 func removePythonDependency(pluginName, pkg string) (string, error) {
@@ -1473,6 +1521,10 @@ func removePythonDependency(pluginName, pkg string) (string, error) {
 }
 
 func ensureNodeRuntimeDependencies(dir string) error {
+	cacheKey := filepath.Clean(dir)
+	if _, ok := nodeRuntimeDependencyCache.Load(cacheKey); ok {
+		return nil
+	}
 	if err := ensureNodePackageJSON(dir, "sillygirl-plugins"); err != nil {
 		return err
 	}
@@ -1484,13 +1536,26 @@ func ensureNodeRuntimeDependencies(dir string) error {
 		}
 	}
 	if !missing {
+		nodeRuntimeDependencyCache.Store(cacheKey, true)
 		return nil
 	}
 	_, err := runPnpm(dir, "install", "--ignore-scripts")
 	if err == nil || nodeRuntimeDependenciesInstalled(dir) {
+		nodeRuntimeDependencyCache.Store(cacheKey, true)
 		return nil
 	}
 	return err
+}
+
+func invalidateNodeRuntimeDependencyCache(dir string) {
+	if strings.TrimSpace(dir) == "" {
+		nodeRuntimeDependencyCache.Range(func(key, _ any) bool {
+			nodeRuntimeDependencyCache.Delete(key)
+			return true
+		})
+		return
+	}
+	nodeRuntimeDependencyCache.Delete(filepath.Clean(dir))
 }
 
 func validatePythonDependencyPlugin(pluginName string) error {
@@ -1548,6 +1613,17 @@ func ensurePythonPackagesDir() (string, error) {
 }
 
 func installedPythonPackages() (map[string]string, error) {
+	pythonInstalledPackagesCache.Lock()
+	if pythonInstalledPackagesCache.values != nil && time.Now().Before(pythonInstalledPackagesCache.expire) {
+		values := map[string]string{}
+		for name, version := range pythonInstalledPackagesCache.values {
+			values[name] = version
+		}
+		pythonInstalledPackagesCache.Unlock()
+		return values, nil
+	}
+	pythonInstalledPackagesCache.Unlock()
+
 	if info, err := os.Stat(pythonPipxVenvDir()); err != nil || !info.IsDir() {
 		return map[string]string{}, nil
 	}
@@ -1571,6 +1647,13 @@ func installedPythonPackages() (map[string]string, error) {
 		}
 		result[name] = row.Version
 	}
+	pythonInstalledPackagesCache.Lock()
+	pythonInstalledPackagesCache.values = map[string]string{}
+	for name, version := range result {
+		pythonInstalledPackagesCache.values[name] = version
+	}
+	pythonInstalledPackagesCache.expire = time.Now().Add(30 * time.Second)
+	pythonInstalledPackagesCache.Unlock()
 	return result, nil
 }
 
@@ -1601,6 +1684,18 @@ func invalidatePipxRuntimeEnvCache() {
 	pythonRuntimeEnvCache.Lock()
 	pythonRuntimeEnvCache.ready = false
 	pythonRuntimeEnvCache.Unlock()
+	invalidateInstalledPythonPackagesCache()
+	pythonPathEnvCache.Range(func(key, _ any) bool {
+		pythonPathEnvCache.Delete(key)
+		return true
+	})
+}
+
+func invalidateInstalledPythonPackagesCache() {
+	pythonInstalledPackagesCache.Lock()
+	pythonInstalledPackagesCache.values = nil
+	pythonInstalledPackagesCache.expire = time.Time{}
+	pythonInstalledPackagesCache.Unlock()
 }
 
 func ensurePipxRuntimeEnvUncached() error {
@@ -1740,6 +1835,14 @@ func pipxInstallEnv() map[string]string {
 }
 
 func resolvePipxCommand() (pipxCommand, error) {
+	pipxCommandCache.Lock()
+	if pipxCommandCache.cmd.Bin != "" {
+		cmd := pipxCommandCache.cmd
+		cmd.Args = append([]string{}, cmd.Args...)
+		pipxCommandCache.Unlock()
+		return cmd, nil
+	}
+	pipxCommandCache.Unlock()
 	if env := strings.TrimSpace(os.Getenv("SILLYGIRL_PIPX")); env != "" {
 		bin, args := splitCommand(env)
 		if bin == "" {
@@ -1748,20 +1851,33 @@ func resolvePipxCommand() (pipxCommand, error) {
 		if !commandWorks(bin, args, "--version") {
 			return pipxCommand{}, errors.New("SILLYGIRL_PIPX 不能执行 pipx")
 		}
-		return pipxCommand{Bin: bin, Args: args}, nil
+		cmd := pipxCommand{Bin: bin, Args: args}
+		cachePipxCommand(cmd)
+		return cmd, nil
 	}
 	for _, name := range []string{"pipx", "pipx.cmd", "pipx.exe"} {
 		if path, err := exec.LookPath(name); err == nil && commandWorks(path, nil, "--version") {
-			return pipxCommand{Bin: path}, nil
+			cmd := pipxCommand{Bin: path}
+			cachePipxCommand(cmd)
+			return cmd, nil
 		}
 	}
 	if bin, args, err := resolvePythonCommand(); err == nil {
 		cmdArgs := append(append([]string{}, args...), "-m", "pipx")
 		if commandWorks(bin, cmdArgs, "--version") {
-			return pipxCommand{Bin: bin, Args: cmdArgs}, nil
+			cmd := pipxCommand{Bin: bin, Args: cmdArgs}
+			cachePipxCommand(cmd)
+			return cmd, nil
 		}
 	}
 	return pipxCommand{}, errors.New("未找到 pipx，请先安装 pipx 或使用 Docker 镜像内置运行时")
+}
+
+func cachePipxCommand(cmd pipxCommand) {
+	pipxCommandCache.Lock()
+	cmd.Args = append([]string{}, cmd.Args...)
+	pipxCommandCache.cmd = cmd
+	pipxCommandCache.Unlock()
 }
 
 func commandWorks(bin string, baseArgs []string, args ...string) bool {
@@ -2007,20 +2123,41 @@ func runPnpm(dir string, args ...string) (string, error) {
 }
 
 func resolvePnpmCommand() (pnpmCommand, error) {
+	pnpmCommandCache.Lock()
+	if pnpmCommandCache.cmd.Bin != "" {
+		cmd := pnpmCommandCache.cmd
+		cmd.Args = append([]string{}, cmd.Args...)
+		pnpmCommandCache.Unlock()
+		return cmd, nil
+	}
+	pnpmCommandCache.Unlock()
 	if env := strings.TrimSpace(os.Getenv("SILLYGIRL_PNPM")); env != "" {
-		return pnpmCommand{Bin: env}, nil
+		cmd := pnpmCommand{Bin: env}
+		cachePnpmCommand(cmd)
+		return cmd, nil
 	}
 	for _, name := range []string{"pnpm", "pnpm.cmd", "pnpm.exe"} {
 		if path, err := exec.LookPath(name); err == nil {
-			return pnpmCommand{Bin: path}, nil
+			cmd := pnpmCommand{Bin: path}
+			cachePnpmCommand(cmd)
+			return cmd, nil
 		}
 	}
 	for _, name := range []string{"corepack", "corepack.cmd", "corepack.exe"} {
 		if path, err := exec.LookPath(name); err == nil {
-			return pnpmCommand{Bin: path, Args: []string{"pnpm"}}, nil
+			cmd := pnpmCommand{Bin: path, Args: []string{"pnpm"}}
+			cachePnpmCommand(cmd)
+			return cmd, nil
 		}
 	}
 	return pnpmCommand{}, errors.New("未找到 pnpm，请先安装 pnpm 或启用 Node.js corepack")
+}
+
+func cachePnpmCommand(cmd pnpmCommand) {
+	pnpmCommandCache.Lock()
+	cmd.Args = append([]string{}, cmd.Args...)
+	pnpmCommandCache.cmd = cmd
+	pnpmCommandCache.Unlock()
 }
 
 func pnpmRegistry() string {
@@ -2070,13 +2207,28 @@ func normalizePipxRegistry(registry string) (string, error) {
 }
 
 func resolveNodeCommand() (string, error) {
+	nodeCommandCache.Lock()
+	if nodeCommandCache.bin != "" {
+		bin := nodeCommandCache.bin
+		nodeCommandCache.Unlock()
+		return bin, nil
+	}
+	nodeCommandCache.Unlock()
 	if env := strings.TrimSpace(os.Getenv("SILLYGIRL_NODE")); env != "" {
+		cacheNodeCommand(env)
 		return env, nil
 	}
 	for _, name := range []string{"node", "node.exe"} {
 		if path, err := exec.LookPath(name); err == nil {
+			cacheNodeCommand(path)
 			return path, nil
 		}
 	}
 	return "", errors.New("未找到 node，请先安装 Node.js 或使用 Docker 镜像内置 Node")
+}
+
+func cacheNodeCommand(bin string) {
+	nodeCommandCache.Lock()
+	nodeCommandCache.bin = bin
+	nodeCommandCache.Unlock()
 }

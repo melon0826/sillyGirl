@@ -164,7 +164,7 @@ func RegistTasks(pt *Tasks) {
 					for _, function := range Functions {
 						if function.UUID == script {
 							for i := range function.Rules {
-								reg, err := regexp.Compile(function.Rules[i])
+								reg, err := functionRulePattern(function, i)
 								if err == nil {
 									if res := reg.FindStringSubmatch(content); len(res) > 0 {
 										sender.SetMatch(res[1:])

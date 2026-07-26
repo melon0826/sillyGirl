@@ -280,7 +280,11 @@ func addNodePluginLocked(path, name, class string) error {
 				console.Error("Python sillygirl 运行时依赖安装失败：%v", err)
 				return nil
 			}
-			cmd.Env = append(cmd.Env, "PYTHONPATH="+pythonPluginPathEnv(pythonPath))
+			cmd.Env = append(cmd.Env,
+				"PYTHONPATH="+pythonPluginPathEnv(pythonPath),
+				"PYTHONDONTWRITEBYTECODE=1",
+				"PYTHONUNBUFFERED=1",
+			)
 		}
 
 		cmd.Dir = workDir

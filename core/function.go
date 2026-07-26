@@ -24,6 +24,12 @@ var Functions = []*common.Function{}
 
 var Messages chan common.Sender
 
+var (
+	ruleParamPattern        = regexp.MustCompile(`\[([^\s\[\]]+)\]`)
+	trailingOptionalPattern = regexp.MustCompile(`\?$`)
+	cronFieldPattern        = regexp.MustCompile(`\S+`)
+)
+
 var ListenOnGroups sync.Map
 var NoListenUsers sync.Map
 var NoReplyGroups sync.Map
@@ -337,9 +343,10 @@ func initToHandleMessage() {
 }
 
 func fmtRule(cmd *common.Function) {
+	cmd.Params = make([][]string, len(cmd.Rules))
 	for i := range cmd.Rules {
 		cmd.Rules[i] = strings.Trim(cmd.Rules[i], "")
-		cmd.Params = append(cmd.Params, []string{})
+		cmd.Params[i] = []string{}
 		if strings.HasPrefix(cmd.Rules[i], "raw") {
 			cmd.Rules[i] = strings.Replace(cmd.Rules[i], "raw ", "", -1)
 			continue
@@ -353,7 +360,7 @@ func fmtRule(cmd *common.Function) {
 		cmd.Rules[i] = strings.ReplaceAll(cmd.Rules[i], `\r\a\w`, "raw")
 		cmd.Rules[i] = strings.Replace(cmd.Rules[i], "(", `[(]`, -1)
 		cmd.Rules[i] = strings.Replace(cmd.Rules[i], ")", `[)]`, -1)
-		ress := regexp.MustCompile(`\[([^\s\[\]]+)\]`).FindAllStringSubmatch(cmd.Rules[i], -1)
+		ress := ruleParamPattern.FindAllStringSubmatch(cmd.Rules[i], -1)
 		for _, res := range ress {
 			var inner = res[1]
 			vv := strings.SplitN(inner, ":", 2)
@@ -365,11 +372,38 @@ func fmtRule(cmd *common.Function) {
 			}
 			cmd.Params[i] = append(cmd.Params[i], name)
 		}
-		cmd.Rules[i] = regexp.MustCompile(`\?$`).ReplaceAllString(cmd.Rules[i], `([\s\S]+)`)
+		cmd.Rules[i] = trailingOptionalPattern.ReplaceAllString(cmd.Rules[i], `([\s\S]+)`)
 		cmd.Rules[i] = strings.Replace(cmd.Rules[i], " ", `\s+`, -1)
 		cmd.Rules[i] = strings.Replace(cmd.Rules[i], "?", `(\S+)`, -1)
 		cmd.Rules[i] = "^" + cmd.Rules[i] + "$"
 	}
+	compileFunctionRules(cmd)
+}
+
+func compileFunctionRules(cmd *common.Function) {
+	cmd.RulePatterns = make([]*regexp.Regexp, len(cmd.Rules))
+	cmd.RuleErrors = make([]error, len(cmd.Rules))
+	for i, rule := range cmd.Rules {
+		reg, err := regexp.Compile(rule)
+		if err != nil {
+			cmd.RuleErrors[i] = err
+			continue
+		}
+		cmd.RulePatterns[i] = reg
+	}
+}
+
+func functionRulePattern(cmd *common.Function, index int) (*regexp.Regexp, error) {
+	if cmd == nil || index < 0 || index >= len(cmd.Rules) {
+		return nil, fmt.Errorf("规则索引不存在")
+	}
+	if index < len(cmd.RulePatterns) && cmd.RulePatterns[index] != nil {
+		return cmd.RulePatterns[index], nil
+	}
+	if index < len(cmd.RuleErrors) && cmd.RuleErrors[index] != nil {
+		return nil, cmd.RuleErrors[index]
+	}
+	return regexp.Compile(cmd.Rules[index])
 }
 
 func AddCommand(cmds []*common.Function) {
@@ -391,7 +425,7 @@ func AddCommand(cmds []*common.Function) {
 				for plt, Cron := range cmds[j].Cron {
 					plt := plt
 					cron := strings.TrimSpace(Cron)
-					if len(regexp.MustCompile(`\S+`).FindAllString(cron, -1)) == 5 {
+					if len(cronFieldPattern.FindAllString(cron, -1)) == 5 {
 						Cron = "0 " + Cron
 					}
 					cronId, err := CRON.AddFunc(Cron, func() {
@@ -540,7 +574,7 @@ func HandleMessage(sender common.Sender) {
 				}
 			}
 			for i := range c.Function.Rules {
-				reg, err := regexp.Compile(c.Function.Rules[i])
+				reg, err := functionRulePattern(&c.Function, i)
 				if err != nil {
 					console.Error("监听器正则错误，%v", err)
 					continue
@@ -597,7 +631,7 @@ func HandleMessage(sender common.Sender) {
 			continue
 		}
 		for i := range function.Rules {
-			reg, err := regexp.Compile(function.Rules[i])
+			reg, err := functionRulePattern(function, i)
 			if err != nil {
 				console.Error("脚本%s正则错误，%v", function.Title, err)
 				continue

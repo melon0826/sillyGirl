@@ -1,9 +1,9 @@
 package core
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"image"
 	"net/http"
 	"os"
@@ -83,11 +83,22 @@ func safeStaticFilePath(staticRoot string, filename string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(rootAbs, targetAbs)
-	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !isStaticChildPath(rootAbs, targetAbs) {
 		return "", errors.New("static filename escapes root")
 	}
+	if resolvedRoot, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		if resolvedTarget, err := filepath.EvalSymlinks(targetAbs); err == nil && !isStaticChildPath(resolvedRoot, resolvedTarget) {
+			return "", errors.New("static filename escapes root")
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+	}
 	return targetAbs, nil
+}
+
+func isStaticChildPath(root, target string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(target))
+	return err == nil && rel != "." && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Server.GET("/api/file/:filename", FindFile)
@@ -107,21 +118,20 @@ func Base642Binary(c *gin.Context) {
 		return
 	}
 	// 解析图片格式
-	_, format, err := image.DecodeConfig(strings.NewReader(string(data)))
-	fmt.Println(format, err)
+	_, format, err := image.DecodeConfig(bytes.NewReader(data))
+	contentType := "application/octet-stream"
 	if err != nil {
-		c.Header("Content-Type", "application/octet-stream")
+		contentType = "application/octet-stream"
 	} else {
 		// 根据图片格式设置响应头
 		switch format {
 		case "jpeg":
-			c.Header("Content-Type", "image/jpeg")
+			contentType = "image/jpeg"
 		case "png":
-			c.Header("Content-Type", "image/png")
+			contentType = "image/png"
 		default:
-			c.Header("Content-Type", "application/octet-stream")
-			return
+			contentType = "application/octet-stream"
 		}
 	}
-	c.Data(http.StatusOK, "application/octet-stream", data)
+	c.Data(http.StatusOK, contentType, data)
 }

@@ -8,12 +8,12 @@ func TestCompiledAndCurrentAppVersion(t *testing.T) {
 		compiled_at = old
 	})
 
-	compiled_at = "v0.1.7"
-	if got := compiledAppVersion(); got != "v0.1.7" {
-		t.Fatalf("compiledAppVersion() = %q, want %q", got, "v0.1.7")
+	compiled_at = "v0.1.8"
+	if got := compiledAppVersion(); got != "v0.1.8" {
+		t.Fatalf("compiledAppVersion() = %q, want %q", got, "v0.1.8")
 	}
-	if got := currentAppVersion(); got != "0.1.7" {
-		t.Fatalf("currentAppVersion() = %q, want %q", got, "0.1.7")
+	if got := currentAppVersion(); got != "0.1.8" {
+		t.Fatalf("currentAppVersion() = %q, want %q", got, "0.1.8")
 	}
 
 	compiled_at = "dev-abcdef0"

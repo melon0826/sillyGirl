@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -135,6 +136,23 @@ func validOneBotAuthorization(auth string, token string) bool {
 	return false
 }
 
+func validOneBotOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	return strings.HasPrefix(origin, "http://127.0.0.1:") ||
+		strings.HasPrefix(origin, "http://localhost:") ||
+		strings.HasPrefix(origin, "http://[::1]:")
+}
+
 func init() {
 	storage.Watch(qq, "debug", func(old, new, key string) *storage.Final {
 		now := ""
@@ -162,9 +180,7 @@ func init() {
 				core.Logs.Warn(`你需要在OneBot机器人配置accessToken以及在傻妞配置对应的参数(set qq token ?)才能保证连接安全，如果不设置将会造成信息泄露和资产损失！！！`)
 			}
 			var upGrader = websocket.Upgrader{
-				CheckOrigin: func(r *http.Request) bool {
-					return true
-				},
+				CheckOrigin: validOneBotOrigin,
 			}
 			ws, err := upGrader.Upgrade(c.Writer, c.Request, nil)
 			if err != nil {

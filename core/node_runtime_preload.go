@@ -3,9 +3,12 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/smallfawn/sillyGirl/utils"
 )
+
+var nodeRuntimePreloadCache sync.Map
 
 func ensureNodeRuntimePreload() (string, error) {
 	dir := filepath.Join(utils.ExecPath, "language", "node")
@@ -13,9 +16,13 @@ func ensureNodeRuntimePreload() (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, "sillygirl-runtime-preload.js")
-	if err := os.WriteFile(path, []byte(nodeRuntimePreloadScript), 0644); err != nil {
+	if _, ok := nodeRuntimePreloadCache.Load(path); ok {
+		return path, nil
+	}
+	if err := writeFileIfChanged(path, []byte(nodeRuntimePreloadScript), 0644); err != nil {
 		return "", err
 	}
+	nodeRuntimePreloadCache.Store(path, true)
 	return path, nil
 }
 

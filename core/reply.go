@@ -29,6 +29,11 @@ type Reply struct {
 var replies []Reply //一切增删查改只需作用到这个变量
 var repliesLock sync.RWMutex
 
+var (
+	replyTemplatePattern  = regexp.MustCompile(`\$\{\s*([^{}]+)\s*\}`)
+	replyBucketRefPattern = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$`)
+)
+
 func init() {
 	REPLY.Foreach(func(b1, b2 []byte) error {
 		repliesLock.Lock()
@@ -201,8 +206,7 @@ var REPLY = MakeBucket("reply")
 
 // 能处理字符：你好，我是${ user.name ?? 6 }
 func parseReply2(str string) string {
-	re := regexp.MustCompile(`\$\{\s*([^{}]+)\s*\}`)
-	return re.ReplaceAllStringFunc(str, func(match string) string {
+	return replyTemplatePattern.ReplaceAllStringFunc(str, func(match string) string {
 		expr := strings.TrimSpace(match[2 : len(match)-1])
 		if value, ok := parseReplyBucketExpression(expr, nil); ok {
 			return value
@@ -214,8 +218,7 @@ func parseReply2(str string) string {
 // rule 专用
 func parseReply3(str string, f func(string, string)) string {
 	ks := map[string]bool{}
-	re := regexp.MustCompile(`\$\{\s*([^{}]+)\s*\}`)
-	return re.ReplaceAllStringFunc(str, func(match string) string {
+	return replyTemplatePattern.ReplaceAllStringFunc(str, func(match string) string {
 		expr := strings.TrimSpace(match[2 : len(match)-1])
 		if value, ok := parseReplyBucketExpression(expr, func(bucket, key string) {
 			id := bucket + "." + key
@@ -238,7 +241,7 @@ func parseReplyBucketExpression(expr string, watch func(string, string)) (string
 		defaultValue = strings.TrimSpace(parts[1])
 		defaultValue = strings.Trim(defaultValue, `"'`)
 	}
-	match := regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$`).FindStringSubmatch(ref)
+	match := replyBucketRefPattern.FindStringSubmatch(ref)
 	if len(match) != 3 {
 		return "", false
 	}

@@ -40,6 +40,21 @@ func TestSafeStaticFilePathRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestSafeStaticFilePathRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+	if got, err := safeStaticFilePath(root, "linked/secret.txt"); err == nil {
+		t.Fatalf("safeStaticFilePath(symlink escape) = %q, want error", got)
+	}
+}
+
 func TestFindFileRejectsTraversal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()

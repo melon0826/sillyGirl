@@ -9,6 +9,13 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
+var (
+	pluginMetaPattern        = regexp.MustCompile(`\*\s?@([\d\w+-]+)(?:\s+([^\n]+?))?\n`)
+	optionalRuleParamPattern = regexp.MustCompile(`\[([^\s\[\]]+)\]`)
+	multiSpacePattern        = regexp.MustCompile("\x20{2,}")
+	classTokenPattern        = regexp.MustCompile(`\S+`)
+)
+
 func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var cbs = []func(){}
 	var rules []string
@@ -30,9 +37,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var carry bool
 	var classes = []string{}
 	ks := map[string]bool{}
-	ress := regexp.MustCompile(
-		`\*\s?@([\d\w+-]+)(?:\s+([^\n]+?))?\n`,
-	).FindAllStringSubmatch(script, -1)
+	ress := pluginMetaPattern.FindAllStringSubmatch(script, -1)
 	for _, res := range ress {
 		switch res[1] {
 		case "rule":
@@ -54,7 +59,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 			})
 			_rs := []string{}
 		FR:
-			ress := regexp.MustCompile(`\[([^\s\[\]]+)\]`).FindAllStringSubmatch(rule, -1)
+			ress := optionalRuleParamPattern.FindAllStringSubmatch(rule, -1)
 			if len(ress) != 0 {
 				res := ress[len(ress)-1]
 				var inner = res[1]
@@ -80,7 +85,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 						_rs = append(_rs, rule1)
 					}
 					rule = strings.Replace(rule, res[0], "", 1)
-					rule = regexp.MustCompile("\x20{2,}").ReplaceAllString(rule, " ")
+					rule = multiSpacePattern.ReplaceAllString(rule, " ")
 					rule = strings.TrimSpace(rule)
 					_rs = append(_rs, rule)
 					goto FR
@@ -92,7 +97,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 				rules = append(rules, rule)
 			}
 		case "class":
-			classes = append(classes, regexp.MustCompile(`[\S]+`).FindAllString(res[2], -1)...)
+			classes = append(classes, classTokenPattern.FindAllString(res[2], -1)...)
 			classes = utils.Unique(classes)
 
 		case "admin":

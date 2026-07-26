@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -16,14 +17,29 @@ import (
 
 const pythonRequiredVersion = "3.12"
 
+var pythonSillygirlModuleCache sync.Map
+var pythonPathEnvCache sync.Map
+var pythonCommandCache = struct {
+	sync.Mutex
+	bin  string
+	args []string
+}{}
+
 func ensurePythonSillygirlModule() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("SILLYGIRL_PYTHON_PATH")); configured != "" {
+		if _, ok := pythonSillygirlModuleCache.Load(configured); ok {
+			return configured, nil
+		}
 		if err := validatePythonRuntimePath(configured); err != nil {
 			return "", err
 		}
+		pythonSillygirlModuleCache.Store(configured, true)
 		return configured, nil
 	}
 	dir := filepath.Join(utils.ExecPath, "language", "python")
+	if _, ok := pythonSillygirlModuleCache.Load(dir); ok {
+		return dir, nil
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
@@ -32,6 +48,7 @@ func ensurePythonSillygirlModule() (string, error) {
 			return "", err
 		}
 	}
+	pythonSillygirlModuleCache.Store(dir, true)
 	return dir, nil
 }
 
@@ -71,12 +88,22 @@ func pythonRuntimeSourceCandidates(name string) []string {
 }
 
 func resolvePythonCommand() (string, []string, error) {
+	pythonCommandCache.Lock()
+	if pythonCommandCache.bin != "" {
+		bin := pythonCommandCache.bin
+		args := append([]string{}, pythonCommandCache.args...)
+		pythonCommandCache.Unlock()
+		return bin, args, nil
+	}
+	pythonCommandCache.Unlock()
+
 	if configured := strings.TrimSpace(os.Getenv("SILLYGIRL_PYTHON_BIN")); configured != "" {
 		bin, args := splitCommand(configured)
 		if bin == "" {
 			return "", nil, errors.New("SILLYGIRL_PYTHON_BIN 为空")
 		}
 		if pythonCommandVersion(bin, args) == pythonRequiredVersion {
+			cachePythonCommand(bin, args)
 			return bin, args, nil
 		}
 		return "", nil, fmt.Errorf("SILLYGIRL_PYTHON_BIN 必须指向 Python %s", pythonRequiredVersion)
@@ -95,10 +122,18 @@ func resolvePythonCommand() (string, []string, error) {
 			continue
 		}
 		if pythonCommandVersion(bin, args) == pythonRequiredVersion {
+			cachePythonCommand(bin, args)
 			return bin, args, nil
 		}
 	}
 	return "", nil, errors.New("未找到 Python 3.12，请安装 Python 3.12 或使用 Docker 镜像内置运行时")
+}
+
+func cachePythonCommand(bin string, args []string) {
+	pythonCommandCache.Lock()
+	pythonCommandCache.bin = bin
+	pythonCommandCache.args = append([]string{}, args...)
+	pythonCommandCache.Unlock()
 }
 
 func splitCommand(command string) (string, []string) {
@@ -121,6 +156,10 @@ func pythonCommandVersion(bin string, args []string) string {
 }
 
 func pythonPluginPathEnv(runtimePath string) string {
+	cacheKey := runtimePath + string(os.PathListSeparator) + os.Getenv("PYTHONPATH")
+	if value, ok := pythonPathEnvCache.Load(cacheKey); ok {
+		return value.(string)
+	}
 	items := []string{}
 	candidates := append([]string{runtimePath}, pythonPipxSitePackageDirs()...)
 	candidates = append(candidates, pythonPackagesDir(), os.Getenv("PYTHONPATH"))
@@ -142,7 +181,9 @@ func pythonPluginPathEnv(runtimePath string) string {
 		seen[key] = true
 		paths = append(paths, item)
 	}
-	return strings.Join(paths, string(os.PathListSeparator))
+	value := strings.Join(paths, string(os.PathListSeparator))
+	pythonPathEnvCache.Store(cacheKey, value)
+	return value
 }
 
 func registerPythonPluginConfigSchema(path, uuid string) error {
@@ -175,6 +216,8 @@ func registerPythonPluginConfigSchema(path, uuid string) error {
 	cmd.Dir = nodePluginWorkDir(path)
 	cmd.Env = append(os.Environ(),
 		"PYTHONPATH="+pythonPluginPathEnv(pythonPath),
+		"PYTHONDONTWRITEBYTECODE=1",
+		"PYTHONUNBUFFERED=1",
 		"PLUGIN_ID="+uuid,
 		"PLUGIN_CONFIG_JSON="+string(utils.JsonMarshal(getPluginUserConfig(uuid))),
 		"SILLYGIRL_CONFIG_REGISTER_ONLY=true",
