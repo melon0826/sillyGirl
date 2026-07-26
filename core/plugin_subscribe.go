@@ -486,46 +486,22 @@ type githubRepoResponse struct {
 }
 
 type githubPublicFileIndexEntry struct {
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	Title        string               `json:"title"`
-	Author       string               `json:"author"`
-	Version      string               `json:"version"`
-	Desc         string               `json:"desc"`
-	Class        string               `json:"class"`
-	Rule         string               `json:"rule"`
-	Public       bool                 `json:"public"`
-	Admin        bool                 `json:"admin"`
-	Disable      bool                 `json:"disable"`
-	Path         string               `json:"path"`
-	Raw          string               `json:"raw"`
-	Type         string               `json:"type"`
-	Origin       string               `json:"origin"`
-	Dependencies githubDependencyList `json:"dependencies"`
-}
-
-type githubDependencyList []string
-
-func (list *githubDependencyList) UnmarshalJSON(data []byte) error {
-	if string(data) == "null" {
-		*list = nil
-		return nil
-	}
-	values := []string{}
-	if err := json.Unmarshal(data, &values); err == nil {
-		*list = values
-		return nil
-	}
-	manifest := map[string]string{}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return err
-	}
-	for name := range manifest {
-		values = append(values, name)
-	}
-	sort.Strings(values)
-	*list = values
-	return nil
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Title        string   `json:"title"`
+	Author       string   `json:"author"`
+	Version      string   `json:"version"`
+	Desc         string   `json:"desc"`
+	Class        string   `json:"class"`
+	Rule         string   `json:"rule"`
+	Public       bool     `json:"public"`
+	Admin        bool     `json:"admin"`
+	Disable      bool     `json:"disable"`
+	Path         string   `json:"path"`
+	Raw          string   `json:"raw"`
+	Dependencies []string `json:"dependencies"`
+	Type         string   `json:"type"`
+	Origin       string   `json:"origin"`
 }
 
 func parseGithubPluginSource(address string) (*githubPluginSource, error) {
@@ -635,17 +611,18 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 			continue
 		}
 		pluginName := strings.TrimSuffix(path.Base(item.Path), path.Ext(item.Path))
+		class := pluginClassFromExt(path.Ext(item.Path))
 		rawURL := githubRawURL(source.Owner, source.Repo, source.Branch, item.Path)
-		pluginAddress := makeGithubNodePluginAddress(source, item.Path, rawURL)
+		pluginAddress := makeGithubNodePluginAddress(source, item.Path, rawURL, class)
 		dependencies := []string{}
 		if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
-			dependencies = parseNodeRequires(string(data))
+			dependencies = parseDeclaredDependencies(string(data), class)
 		}
 		items = append(items, &common.Function{
 			UUID:         nameUuid(pluginName),
 			Title:        pluginName,
-			Type:         NODE,
-			Suffix:       ".js",
+			Type:         class,
+			Suffix:       path.Ext(item.Path),
 			Description:  item.Path,
 			Version:      "v1.0.0",
 			Author:       source.Owner,
@@ -663,7 +640,7 @@ func githubPluginSourceItems(address string) ([]*common.Function, error) {
 		return items[i].Description < items[j].Description
 	})
 	if len(items) == 0 {
-		return nil, errors.New("该仓库 plugins 目录下没有找到 JS 插件")
+		return nil, errors.New("该仓库 plugins 目录下没有找到 JS 或 Python 插件")
 	}
 	return items, nil
 }
@@ -686,6 +663,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		}
 		pluginPath := strings.TrimSpace(record.Path)
 		pluginName := strings.TrimSuffix(path.Base(pluginPath), path.Ext(pluginPath))
+		class := pluginClassFromIndexType(record.Type, pluginPath)
 		title := record.Title
 		if title == "" {
 			title = record.Name
@@ -712,18 +690,12 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 		if rawURL == "" {
 			rawURL = githubRawURL(source.Owner, source.Repo, source.Branch, pluginPath)
 		}
-		pluginAddress := makeGithubNodePluginAddress(source, pluginPath, rawURL)
-		dependencies := normalizeDependencyNames([]string(record.Dependencies))
-		if len(dependencies) == 0 && rawURL != "" {
-			if data, err := httpGetBytes(rawURL, 20*time.Second); err == nil {
-				dependencies = parseNodeRequires(string(data))
-			}
-		}
+		pluginAddress := makeGithubNodePluginAddress(source, pluginPath, rawURL, class)
 		items = append(items, &common.Function{
 			UUID:         id,
 			Title:        title,
-			Type:         NODE,
-			Suffix:       ".js",
+			Type:         class,
+			Suffix:       path.Ext(pluginPath),
 			Description:  record.Desc,
 			Rule:         strings.TrimSpace(record.Rule),
 			Version:      firstNonEmpty(record.Version, "v1.0.0"),
@@ -733,7 +705,7 @@ func githubPublicFileIndexItems(source *githubPluginSource) ([]*common.Function,
 			Classes:      classes,
 			Public:       record.Public,
 			Disable:      record.Disable,
-			Dependencies: dependencies,
+			Dependencies: record.Dependencies,
 			PluginPublisher: common.PluginPublisher{
 				Address:      pluginAddress,
 				Organization: organization,
@@ -780,43 +752,68 @@ func completeGithubPublicFileIndexEntry(record githubPublicFileIndexEntry, key s
 	if record.Title == "" {
 		record.Title = record.Name
 	}
+	if len(record.Dependencies) != 0 {
+		record.Dependencies = normalizeDependencyNamesForRuntime(record.Dependencies, pluginClassFromIndexType(record.Type, record.Path))
+	}
 	return record
 }
 
 func isGithubFlatNodePlugin(itemPath string) bool {
 	itemPath = strings.TrimSpace(itemPath)
-	if path.Dir(itemPath) != "plugins" || !strings.HasSuffix(strings.ToLower(itemPath), ".js") {
+	ext := strings.ToLower(path.Ext(itemPath))
+	if path.Dir(itemPath) != "plugins" || (ext != ".js" && ext != ".py") {
 		return false
 	}
 	name := strings.TrimSuffix(path.Base(itemPath), path.Ext(itemPath))
 	return name != "" && !strings.Contains(name, "..")
 }
 
+func pluginClassFromIndexType(typeText, itemPath string) string {
+	if runtime := normalizePluginIndexType(typeText); runtime != "" {
+		return runtime
+	}
+	return pluginClassFromExt(path.Ext(itemPath))
+}
+
+func normalizePluginIndexType(typeText string) string {
+	switch strings.ToLower(strings.TrimSpace(typeText)) {
+	case PYTHON, "py":
+		return PYTHON
+	case NODE, "nodejs", "js", "javascript":
+		return NODE
+	default:
+		return ""
+	}
+}
+
 func githubRawURL(owner, repo, branch, itemPath string) string {
 	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/refs/heads/%s/%s", owner, repo, url.PathEscape(branch), itemPath)
 }
 
-func makeGithubNodePluginAddress(source *githubPluginSource, pluginPath string, rawURL ...string) string {
+func makeGithubNodePluginAddress(source *githubPluginSource, pluginPath string, rawValues ...string) string {
 	values := url.Values{}
 	values.Set("branch", source.Branch)
 	values.Set("path", pluginPath)
-	if len(rawURL) != 0 && strings.TrimSpace(rawURL[0]) != "" {
-		values.Set("raw", strings.TrimSpace(rawURL[0]))
+	if len(rawValues) != 0 && strings.TrimSpace(rawValues[0]) != "" {
+		values.Set("raw", strings.TrimSpace(rawValues[0]))
+	}
+	if len(rawValues) > 1 && strings.TrimSpace(rawValues[1]) != "" {
+		values.Set("type", normalizePluginIndexType(rawValues[1]))
 	}
 	return fmt.Sprintf("%s://%s/%s?%s", githubNodePluginScheme, source.Owner, source.Repo, values.Encode())
 }
 
-func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, string, error) {
+func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, string, string, error) {
 	parsed, err := url.Parse(address)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 	if parsed.Scheme != githubNodePluginScheme {
-		return nil, "", "", errors.New("不是 GitHub Node 插件地址")
+		return nil, "", "", "", errors.New("不是 GitHub Node 插件地址")
 	}
 	pluginPath := strings.Trim(parsed.Query().Get("path"), "/")
 	if !isGithubFlatNodePlugin(pluginPath) || strings.Contains(pluginPath, "..") {
-		return nil, "", "", errors.New("GitHub Node 插件路径不合法")
+		return nil, "", "", "", errors.New("GitHub Node 插件路径不合法")
 	}
 	source := &githubPluginSource{
 		Owner:  parsed.Host,
@@ -824,20 +821,21 @@ func parseGithubNodePluginAddress(address string) (*githubPluginSource, string, 
 		Branch: parsed.Query().Get("branch"),
 	}
 	if source.Owner == "" || source.Repo == "" || source.Branch == "" {
-		return nil, "", "", errors.New("GitHub Node 插件地址不完整")
+		return nil, "", "", "", errors.New("GitHub Node 插件地址不完整")
 	}
 	rawURL := strings.TrimSpace(parsed.Query().Get("raw"))
 	if rawURL != "" && !isSafeGithubRawURL(rawURL) {
-		return nil, "", "", errors.New("GitHub Node 插件 raw 地址不合法")
+		return nil, "", "", "", errors.New("GitHub Node 插件 raw 地址不合法")
 	}
-	return source, pluginPath, rawURL, nil
+	class := pluginClassFromIndexType(parsed.Query().Get("type"), pluginPath)
+	return source, pluginPath, rawURL, class, nil
 }
 
 func installGithubNodePlugin(address string) error {
 	pluginLock.Lock()
 	defer pluginLock.Unlock()
 
-	source, pluginPath, rawURL, err := parseGithubNodePluginAddress(address)
+	source, pluginPath, rawURL, class, err := parseGithubNodePluginAddress(address)
 	if err != nil {
 		return err
 	}
@@ -861,8 +859,8 @@ func installGithubNodePlugin(address string) error {
 		return err
 	}
 	fileName := filepath.Base(pluginPath)
-	if strings.EqualFold(fileName, "main.js") || strings.EqualFold(fileName, "demo.main.js") {
-		fileName = pluginName + ".js"
+	if strings.EqualFold(fileName, "main.js") || strings.EqualFold(fileName, "main.py") || strings.EqualFold(fileName, "demo.main.js") {
+		fileName = pluginName + path.Ext(pluginPath)
 	}
 	mainFile := filepath.Join(target, fileName)
 	if err := ensureChildPath(target, mainFile); err != nil {
@@ -871,16 +869,20 @@ func installGithubNodePlugin(address string) error {
 	if err := os.WriteFile(mainFile, data, 0644); err != nil {
 		return err
 	}
-	if err := ensureNodeSillygirlModule(target); err != nil {
+	if class == NODE {
+		if err := ensureNodeSillygirlModule(target); err != nil {
+			return err
+		}
+		if err := ensureNodePackageJSON(target, "sillygirl-plugins"); err != nil {
+			return err
+		}
+	} else if _, err := ensurePythonSillygirlModule(); err != nil {
 		return err
 	}
-	if err := ensureNodePackageJSON(target, "sillygirl-plugins"); err != nil {
+	if err := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, class); err != nil {
 		return err
 	}
-	if err := addNodePluginLocked(strings.ReplaceAll(mainFile, "\\", "/"), pluginName, NODE); err != nil {
-		return err
-	}
-	console.Log("已安装 NodeJS 插件 %s", pluginName)
+	console.Log("已安装脚本插件 %s", pluginName)
 	return nil
 }
 
@@ -975,7 +977,8 @@ func isSafeGithubRawURL(address string) bool {
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return false
 	}
-	return isGithubURLHost(parsed.Host) && strings.HasSuffix(strings.ToLower(parsed.Path), ".js")
+	ext := strings.ToLower(path.Ext(parsed.Path))
+	return isGithubURLHost(parsed.Host) && (ext == ".js" || ext == ".py")
 }
 
 func parseBoolText(value string) bool {

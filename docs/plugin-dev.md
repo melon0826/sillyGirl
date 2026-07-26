@@ -1,6 +1,6 @@
 # 插件开发指南
 
-SillyGirl 的插件系统基于外部 NodeJS 运行时。插件以 `.js` 文件形式放在 `/data/plugins`，通过顶部注释声明元数据，由框架自动加载、匹配，并通过 gRPC 与 Go 主程序通信。
+SillyGirl 的插件系统基于外部脚本运行时。插件以 `.js` 或 `.py` 文件形式放在 `/data/plugins`，通过顶部注释声明元数据，由框架自动加载、匹配，并通过 gRPC 与 Go 主程序通信。
 
 ## 目录
 
@@ -26,18 +26,20 @@ SillyGirl 的插件系统基于外部 NodeJS 运行时。插件以 `.js` 文件�
 
 一个最小插件由注释元数据和执行代码组成：
 
-NodeJS 脚本插件默认使用扁平文件结构，容器内路径为：
+脚本插件默认使用扁平文件结构，容器内路径为：
 
 ```text
 /data/plugins/
   smallcat.js
+  hello.py
   package.json
   pnpm-lock.yaml
   node_modules/
 ```
 
-依赖是插件目录共享的，所有 NodeJS 插件共用 `/data/plugins/package.json` 和 `/data/plugins/node_modules`。旧版
+NodeJS 依赖是插件目录共享的，所有 NodeJS 插件共用 `/data/plugins/package.json` 和 `/data/plugins/node_modules`。旧版
 `/data/plugins/插件名/main.js` 仍会兼容加载，但新建和插件市场安装都会写入 `/data/plugins/插件名.js`。
+Python 插件使用 Python 3.12，文件为 `/data/plugins/插件名.py`。Docker 镜像已内置 Python 3.12、pipx、`grpcio` 和 `protobuf`；本地运行时需要自行安装 Python 3.12、pipx 并确保 `grpcio`、`protobuf` 可导入。
 
 ```js
 /**
@@ -46,6 +48,25 @@ NodeJS 脚本插件默认使用扁平文件结构，容器内路径为：
  */
 
 s.reply("Hello World!");
+```
+
+Python 最小插件：
+
+```python
+"""
+* @title PythonHello
+* @rule raw ^py你好$
+"""
+
+import asyncio
+from sillygirl import sender as s
+
+
+async def main():
+    await s.reply("Hello World!")
+
+
+asyncio.run(main())
 ```
 
 插件文件可以包含多个 `@rule`，每条规则独立匹配：
@@ -84,6 +105,7 @@ if (content === "你好") {
 | `version` | string | 否 | 版本号，如 `v1.0.0` |
 | `author` | string | 否 | 作者名 |
 | `desc` | string | 否 | 插件描述 |
+| `depe` | JSON array | 否 | 插件依赖声明，例如 `@depe ["ipp"]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
 | `icon` | string | 否 | 插件图标 URL |
 | `public` | boolean | 否 | `true` 时允许发布到插件市场 |
 | `disable` | boolean | 否 | `true` 时禁用插件 |
@@ -99,6 +121,7 @@ if (content === "你好") {
  * @version v1.2.0
  * @author cdle
  * @desc 每天早上9点推送新闻早报
+ * @depe ["axios"]
  * @icon https://example.com/icon.png
  * @public true
  */
@@ -106,7 +129,7 @@ if (content === "你好") {
 
 ### Web 服务脚本
 
-`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻 NodeJS 进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本内 Express 自己决定。
+`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件通常使用 Express；Python 插件可以使用 Python HTTP 框架或标准库自行监听。
 
 ```js
 /**
@@ -158,13 +181,15 @@ const { sender: s } = require("sillygirl");
 console.log("当前触发平台：" + s.getPlatform());
 ```
 
-如果在 Admin 面板「定时任务」里选择 `node 插件名.js` 创建任务，系统会自动把 Cron 表达式写回该脚本头部注释，避免生成重复的独立任务。
+如果在 Admin 面板「定时任务」里选择 `node 插件名.js` 或 `python 插件名.py` 创建任务，系统会自动把 Cron 表达式写回该脚本头部注释，避免生成重复的独立任务。
 
 ## 全局对象与 API
 
 ### sender (s)
 
 当前消息的 Sender 对象，是插件中最核心的交互入口。
+
+NodeJS 插件里可以直接调用同步方法；Python 插件里 SDK 方法是异步方法，需要在 `async def main()` 中 `await s.reply(...)`、`await s.getContent()`。
 
 #### 用户信息
 
@@ -311,6 +336,28 @@ ConfigDB.set(obj)     // 保存指定配置对象
 
 注意：配置 schema 会在插件执行到 `new SillyGirlPluginConfig(schema)` 或 `form(schema)` 时注册。新插件首次安装后，
 如果后台「插件配置」里还看不到它，先触发一次插件规则或把插件声明为 `@on_start true`。
+
+Python 插件也支持同一套配置 schema，构造函数不用 `new`，异步读取配置：
+
+```python
+from sillygirl import sillyGirlCreateSchema, SillyGirlPluginConfig
+
+schema = sillyGirlCreateSchema.object({
+    "host": sillyGirlCreateSchema.string()
+        .setTitle("服务地址")
+        .setDefault("http://127.0.0.1:9090"),
+    "enabled": sillyGirlCreateSchema.boolean()
+        .setTitle("启用")
+        .setDefault(False),
+})
+
+config = SillyGirlPluginConfig(schema)
+
+
+async def main():
+    values = await config.get()
+    print(values)
+```
 
 ### QingLong 内联客户端
 

@@ -69,21 +69,31 @@ func parsePluginCronTaskID(taskID string) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
-func nodeCommandForFunction(f *common.Function) string {
+func scriptCommandForFunction(f *common.Function) string {
+	if f == nil {
+		return ""
+	}
 	name := nodePluginNameFromPath(f.Path)
 	if name == "" {
-		name = strings.TrimSuffix(f.Title, ".js")
+		name = strings.TrimSuffix(strings.TrimSuffix(f.Title, ".js"), ".py")
 	}
 	if name == "" {
 		return ""
 	}
-	return "node " + name + ".js"
+	switch f.Type {
+	case NODE:
+		return "node " + name + ".js"
+	case PYTHON:
+		return "python " + name + ".py"
+	default:
+		return ""
+	}
 }
 
 func pluginCronTasks() []*Tasks {
 	rows := []*Tasks{}
 	for _, f := range Functions {
-		if f == nil || f.Type != NODE || len(f.Cron) == 0 {
+		if f == nil || (f.Type != NODE && f.Type != PYTHON) || len(f.Cron) == 0 {
 			continue
 		}
 		platforms := make([]string, 0, len(f.Cron))
@@ -94,13 +104,13 @@ func pluginCronTasks() []*Tasks {
 		for _, platform := range platforms {
 			title := f.Title
 			if title == "" {
-				title = strings.TrimPrefix(nodeCommandForFunction(f), "node ")
+				title = scriptTaskTitle(f)
 			}
 			rows = append(rows, &Tasks{
 				ID:       pluginCronTaskID(f.UUID, platform),
 				Title:    title,
 				Schedule: f.Cron[platform],
-				Command:  nodeCommandForFunction(f),
+				Command:  scriptCommandForFunction(f),
 				Scripts:  []string{f.UUID},
 				Remark:   "来自脚本注释 @cron",
 				Enable:   !f.Disable,
@@ -110,16 +120,27 @@ func pluginCronTasks() []*Tasks {
 	return rows
 }
 
-func findNodeFunctionByTask(taskID, command string) (*common.Function, string) {
+func scriptTaskTitle(f *common.Function) string {
+	command := scriptCommandForFunction(f)
+	if strings.HasPrefix(command, "node ") {
+		return strings.TrimPrefix(command, "node ")
+	}
+	if strings.HasPrefix(command, "python ") {
+		return strings.TrimPrefix(command, "python ")
+	}
+	return command
+}
+
+func findScriptFunctionByTask(taskID, command string) (*common.Function, string) {
 	if uuid, platform, ok := parsePluginCronTaskID(taskID); ok {
 		for _, f := range Functions {
-			if f != nil && f.UUID == uuid && f.Type == NODE {
+			if f != nil && f.UUID == uuid && (f.Type == NODE || f.Type == PYTHON) {
 				return f, platform
 			}
 		}
 	}
-	if target := nodeTaskTarget(command); target != "" {
-		return nodeFunctionByCommandTarget(target), "task"
+	if target, class := scriptTaskTarget(command); target != "" {
+		return scriptFunctionByCommandTarget(target, class), "task"
 	}
 	return nil, ""
 }
@@ -127,7 +148,7 @@ func findNodeFunctionByTask(taskID, command string) (*common.Function, string) {
 func RegistTasks(pt *Tasks) {
 	pt.Handle = func() {
 		content := pt.Command
-		if runNodeTaskCommand(content) {
+		if runScriptTaskCommand(content) {
 			return
 		}
 		for _, meta := range pt.Senders {
@@ -320,7 +341,7 @@ func init() {
 			case "command":
 				if v, ok := value.(string); ok {
 					tp.Command = v
-					if strings.HasPrefix(strings.TrimSpace(v), "node ") {
+					if isScriptTaskCommand(v) {
 						tp.Scripts = nil
 						tp.Senders = nil
 						tp.Remark = ""
@@ -347,7 +368,7 @@ func init() {
 			ApiFail(ctx, err.Error())
 			return
 		}
-		if f, platform := findNodeFunctionByTask(task_id, tp.Command); f != nil {
+		if f, platform := findScriptFunctionByTask(task_id, tp.Command); f != nil {
 			if err := updatePluginCronAnnotation(f, platform, tp.Schedule); err != nil {
 				ApiFail(ctx, err.Error())
 				return
@@ -376,7 +397,7 @@ func init() {
 			ApiFail(ctx, "任务ID不为空")
 			return
 		}
-		if f, platform := findNodeFunctionByTask(pt.ID, pt.Command); f != nil {
+		if f, platform := findScriptFunctionByTask(pt.ID, pt.Command); f != nil {
 			if err := updatePluginCronAnnotation(f, platform, ""); err != nil {
 				ApiFail(ctx, err.Error())
 				return
@@ -409,12 +430,17 @@ func init() {
 		}
 		functions := Functions
 		for _, function := range functions {
-			if function.UUID != "" && function.Type == NODE {
+			if function.UUID != "" && (function.Type == NODE || function.Type == PYTHON) {
 				name := nodePluginNameFromPath(function.Path)
 				if name == "" {
-					name = strings.TrimSuffix(function.Title, ".js")
+					name = strings.TrimSuffix(strings.TrimSuffix(function.Title, ".js"), ".py")
 				}
-				scripts[function.UUID] = name + ".js"
+				switch function.Type {
+				case NODE:
+					scripts[function.UUID] = name + ".js"
+				case PYTHON:
+					scripts[function.UUID] = name + ".py"
+				}
 			}
 		}
 		var user_names = []NicklabeL{}
@@ -482,14 +508,14 @@ func validateTaskSchedule(schedule string) error {
 	return nil
 }
 
-func runNodeTaskCommand(command string) bool {
-	target := nodeTaskTarget(command)
+func runScriptTaskCommand(command string) bool {
+	target, class := scriptTaskTarget(command)
 	if target == "" {
 		return false
 	}
-	f := nodeFunctionByCommandTarget(target)
+	f := scriptFunctionByCommandTarget(target, class)
 	if f == nil || f.Handle == nil {
-		console.Error("定时任务 NodeJS 脚本不存在：%s", target)
+		console.Error("定时任务脚本不存在：%s", target)
 		return true
 	}
 	sender := &CustomSender{
@@ -505,27 +531,40 @@ func runNodeTaskCommand(command string) bool {
 	return true
 }
 
-func nodeTaskTarget(command string) string {
-	command = strings.TrimSpace(command)
-	if !strings.HasPrefix(command, "node ") {
-		return ""
-	}
-	target := strings.TrimSpace(strings.TrimPrefix(command, "node "))
-	target = strings.Trim(target, `"'`)
-	if target == "" {
-		return ""
-	}
-	return target
+func isScriptTaskCommand(command string) bool {
+	target, _ := scriptTaskTarget(command)
+	return target != ""
 }
 
-func nodeFunctionByCommandTarget(target string) *common.Function {
-	cleanTarget := strings.TrimSuffix(filepath.Base(filepath.ToSlash(target)), ".js")
+func scriptTaskTarget(command string) (string, string) {
+	command = strings.TrimSpace(command)
+	class := ""
+	switch {
+	case strings.HasPrefix(command, "node "):
+		class = NODE
+		command = strings.TrimSpace(strings.TrimPrefix(command, "node "))
+	case strings.HasPrefix(command, "python "):
+		class = PYTHON
+		command = strings.TrimSpace(strings.TrimPrefix(command, "python "))
+	default:
+		return "", ""
+	}
+	target := strings.Trim(command, `"'`)
+	if target == "" {
+		return "", ""
+	}
+	return target, class
+}
+
+func scriptFunctionByCommandTarget(target string, class string) *common.Function {
+	cleanTarget := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(filepath.ToSlash(target)), ".js"), ".py")
 	for _, f := range Functions {
-		if f == nil || f.Type != NODE {
+		if f == nil || f.Type != class {
 			continue
 		}
 		pluginName := nodePluginNameFromPath(f.Path)
-		if pluginName == cleanTarget || strings.TrimSuffix(f.Title, ".js") == cleanTarget {
+		title := strings.TrimSuffix(strings.TrimSuffix(f.Title, ".js"), ".py")
+		if pluginName == cleanTarget || title == cleanTarget {
 			return f
 		}
 	}
@@ -541,7 +580,7 @@ func updatePluginCronAnnotation(f *common.Function, _ string, schedule string) e
 	if err != nil {
 		return err
 	}
-	next := upsertPluginCronAnnotation(string(data), schedule)
+	next := upsertPluginCronAnnotation(string(data), schedule, f.Type)
 	if err := os.WriteFile(f.Path, []byte(next), 0644); err != nil {
 		return err
 	}
@@ -551,10 +590,14 @@ func updatePluginCronAnnotation(f *common.Function, _ string, schedule string) e
 	return nil
 }
 
-func upsertPluginCronAnnotation(script, schedule string) string {
+func upsertPluginCronAnnotation(script, schedule string, scriptType ...string) string {
 	newline := "\n"
 	if strings.Contains(script, "\r\n") {
 		newline = "\r\n"
+	}
+	kind := ""
+	if len(scriptType) > 0 {
+		kind = scriptType[0]
 	}
 	lines := strings.Split(strings.ReplaceAll(script, "\r\n", "\n"), "\n")
 	cronLine := regexp.MustCompile(`^(\s*\*\s*@cron\s+)(.+?)\s*$`)
@@ -580,11 +623,45 @@ func upsertPluginCronAnnotation(script, schedule string) string {
 				break
 			}
 		}
+		if !inserted && kind == PYTHON {
+			inserted = insertPythonCronAnnotation(&out, insert)
+		}
 		if !inserted {
-			out = append([]string{"/**", insert, " */"}, out...)
+			if kind == PYTHON {
+				out = append([]string{`"""`, insert, `"""`, ""}, out...)
+			} else {
+				out = append([]string{"/**", insert, " */"}, out...)
+			}
 		}
 	}
 	return strings.Join(out, newline)
+}
+
+func insertPythonCronAnnotation(lines *[]string, insert string) bool {
+	out := *lines
+	quote := ""
+	for i, line := range out {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, `"""`) {
+			quote = `"""`
+		} else if strings.HasPrefix(trimmed, `'''`) {
+			quote = `'''`
+		}
+		if quote == "" {
+			return false
+		}
+		for j := i + 1; j < len(out); j++ {
+			if strings.TrimSpace(out[j]) == quote {
+				*lines = append(out[:j], append([]string{insert}, out[j:]...)...)
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func formatCronMetaValue(schedule string) string {

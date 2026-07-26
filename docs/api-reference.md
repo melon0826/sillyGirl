@@ -393,13 +393,37 @@ message ConsoleRequest {
 | `AdapterSender` | `AdapterRequest` | `Default` | 获取 Sender |
 | `Console` | `ConsoleRequest` | `Empty` | 控制台日志 |
 
-### Python 客户端示例
+### Python 插件示例
+
+Python 插件运行在 Python 3.12 中，通过 `sillygirl` SDK 调用 Go 主程序能力：
+
+```python
+"""
+* @title Python 示例
+* @rule raw ^py$
+"""
+
+import asyncio
+from sillygirl import sender as s, Bucket
+
+
+async def main():
+    db = Bucket("demo")
+    count = await db.get("count", 0)
+    await db.set("count", count + 1)
+    await s.reply(f"count={count + 1}")
+
+
+asyncio.run(main())
+```
+
+### Python gRPC 客户端示例
 
 ```python
 import grpc
 from proto3 import srpc_pb2, srpc_pb2_grpc
 
-channel = grpc.insecure_channel('localhost:8080')
+channel = grpc.insecure_channel('localhost:50051')
 stub = srpc_pb2_grpc.SillyGirlServiceStub(channel)
 
 # 获取 Bucket 值

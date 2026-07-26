@@ -29,6 +29,18 @@ func TestCanUseAsCarryScriptAllowsCarryNodePlugin(t *testing.T) {
 	}
 }
 
+func TestCanUseAsCarryScriptAllowsCarryPythonPlugin(t *testing.T) {
+	fn := &common.Function{
+		UUID:  "script.py",
+		Type:  PYTHON,
+		Carry: true,
+		Rules: []string{"^hello$"},
+	}
+	if !canUseAsCarryScript(fn) {
+		t.Fatal("Python plugin with @carry should be available as carry script")
+	}
+}
+
 func TestCanUseAsCarryScriptRejectsLongRunningPlugin(t *testing.T) {
 	fn := &common.Function{
 		UUID:    "web.js",

@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	appVersion          = "0.1.4"
+	appVersion          = "0.1.5"
 	appRepository       = "https://github.com/smallfawn/sillyGirl"
 	remoteVersionRawURL = "https://raw.githubusercontent.com/smallfawn/sillyGirl/refs/heads/main/VERSION"
 )
@@ -29,11 +29,24 @@ var appVersionState = struct {
 var appVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$`)
 
 func currentAppVersion() string {
-	version := normalizeAppVersion(compiled_at)
+	version := normalizeAppVersion(compiledAppVersion())
 	if version == "" {
 		return appVersion
 	}
 	return version
+}
+
+func compiledAppVersion() string {
+	version := strings.TrimSpace(compiled_at)
+	if version == "" {
+		return appVersion
+	}
+	return version
+}
+
+func syncLocalAppVersionStorage() {
+	sillyGirl.Set2("compiled_at", compiledAppVersion())
+	sillyGirl.Set2("version", currentAppVersion())
 }
 
 func latestAppVersion() (string, string) {

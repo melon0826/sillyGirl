@@ -135,3 +135,29 @@ func TestNormalizeNodeScriptFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizePythonDependencyName(t *testing.T) {
+	tests := map[string]string{
+		"requests==2.32.0":   "requests",
+		"pydantic[email]":    "pydantic",
+		"beautiful_soup4":    "beautiful-soup4",
+		"urllib.parse":       "",
+		"../bad":             "",
+		"https://bad/pkg.py": "",
+	}
+	for input, want := range tests {
+		if got := normalizePythonDependencyName(input); got != want {
+			t.Fatalf("normalizePythonDependencyName(%q) = %q; want %q", input, got, want)
+		}
+	}
+}
+
+func TestNormalizePipxRegistryDefault(t *testing.T) {
+	got, err := normalizePipxRegistry("")
+	if err != nil {
+		t.Fatalf("normalizePipxRegistry returned error: %v", err)
+	}
+	if got != defaultPipxRegistry {
+		t.Fatalf("normalizePipxRegistry(\"\") = %q; want %q", got, defaultPipxRegistry)
+	}
+}

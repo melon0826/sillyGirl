@@ -21,6 +21,7 @@ sillyGirl.cache
 sillyGirl.*
 !proto3/sillygirl.js
 !proto3/sillygirl.d.ts
+!proto3/sillygirl.py
 main
 sillyGirl.pid
 sillyGirl.pid

@@ -148,13 +148,13 @@ Message Router 是消息流转的核心枢纽，负责过滤、匹配和分发�
 
 **文件**：`core/plugin_core.go`, `core/plugin_impl.go`
 
-Plugin Engine 负责扫描 NodeJS 插件、解析元数据，并通过外部 NodeJS 子进程运行插件。
+Plugin Engine 负责扫描脚本插件、解析元数据，并通过外部 NodeJS 或 Python 子进程运行插件。
 
 **插件加载流程**：
 
-1. **扫描目录**：从 `/data/plugins` 读取所有 `.js` 插件文件
+1. **扫描目录**：从 `/data/plugins` 读取所有 `.js` 和 `.py` 插件文件
 2. **解析元数据**：通过正则提取注释中的 `@title`、`@rule` 等字段
-3. **注册运行器**：为插件绑定 NodeJS 子进程执行函数
+3. **注册运行器**：按文件类型绑定 NodeJS 或 Python 3.12 子进程执行函数
 4. **注册命令**：调用 `AddCommand()` 将插件加入全局 `Functions` 数组
 5. **规则格式化**：`fmtRule()` 将声明式规则转换为标准正则表达式
 
@@ -163,16 +163,16 @@ Plugin Engine 负责扫描 NodeJS 插件、解析元数据，并通过外部 Nod
 ```
 消息到达
   → 匹配 Function
-  → 启动 NodeJS 子进程
-  → 预加载 SillyGirl NodeJS 运行时
+  → 启动 NodeJS 或 Python 子进程
+  → 加载 SillyGirl 脚本运行时 SDK
   → 通过 gRPC 注入 sender/Bucket/Adapter 等能力
   → 执行用户插件代码
   → 子进程退出
 ```
 
-每次插件执行都在独立 NodeJS 子进程中，单个插件崩溃不会拖垮 Go 主程序。
+每次插件执行都在独立脚本子进程中，单个插件崩溃不会拖垮 Go 主程序。
 
-**NodeJS 全局对象注入**：
+**脚本运行时能力**：
 
 - `s` / `sender` → 当前消息 sender 对象
 - `Bucket(name)` → 返回存储桶对象
@@ -316,7 +316,8 @@ Message Received
       → regexp.Match(rule, content)
       → if matched:
         → exec node --require sillygirl-runtime-preload.js <plugin.js>
-        → NodeJS runtime 通过 gRPC 调用 Go 主程序
+          或 python3.12 -u <plugin.py>
+        → 脚本运行时通过 gRPC 调用 Go 主程序
         → sender.Finish()
         → if sender.IsAtLast() → sender.Reply(accumulated)
 ```
@@ -330,7 +331,7 @@ Message Received
 [storage.Watch 触发]
          │
          ▼
-[AddNodePlugin()] ──→ [pluginParse()] ──→ [绑定 NodeJS 执行器]
+[AddNodePlugin()] ──→ [pluginParse()] ──→ [绑定脚本执行器]
          │
          ▼
 [AddCommand()] ──→ [fmtRule()] ──→ [cron.AddFunc()]
@@ -343,7 +344,7 @@ Message Received
 [消息匹配]  [定时触发]
     │         │
     ▼         ▼
-[f.Handle()] (NodeJS 子进程执行)
+[f.Handle()] (NodeJS/Python 子进程执行)
     │
     ▼
 [插件输出 / 错误捕获]
@@ -369,7 +370,7 @@ SillyGirl 的存储层采用三层架构：
 ```
 ┌─────────────────────────────────────────┐
 │           Application Layer              │
-│         (plugin JS / core logic)         │
+│       (plugin JS/Python / core logic)    │
 └─────────────────┬───────────────────────┘
                   │ Bucket 接口
 ┌─────────────────▼───────────────────────┐
@@ -395,9 +396,9 @@ SillyGirl 的存储层采用三层架构：
 
 ### 插件隔离
 
-- **进程隔离**：每次插件执行运行在独立 NodeJS 子进程中
+- **进程隔离**：每次插件执行运行在独立 NodeJS 或 Python 子进程中
 - **panic 捕获**：`recover()` 包裹所有插件入口，单个插件崩溃不影响其他插件
-- **资源隔离**：插件死循环或崩溃只影响当前 NodeJS 子进程
+- **资源隔离**：插件死循环或崩溃只影响当前脚本子进程
 
 ### 权限控制
 

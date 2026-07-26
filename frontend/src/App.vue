@@ -3,6 +3,7 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { basicSetup } from 'codemirror';
 import Alert from 'ant-design-vue/es/alert';
@@ -22,6 +23,7 @@ import message from 'ant-design-vue/es/message';
 import Modal from 'ant-design-vue/es/modal';
 import Popconfirm from 'ant-design-vue/es/popconfirm';
 import Row from 'ant-design-vue/es/row';
+import Segmented from 'ant-design-vue/es/segmented';
 import Select from 'ant-design-vue/es/select';
 import Space from 'ant-design-vue/es/space';
 import Spin from 'ant-design-vue/es/spin';
@@ -163,8 +165,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.1.4',
-    remote: info.remote || info.local || '0.1.4',
+    local: info.local || '0.1.5',
+    remote: info.remote || info.local || '0.1.5',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -329,6 +331,7 @@ const scriptState = reactive({ content: '', loading: false });
 const scriptCreateState = reactive({ open: false, fileName: '新脚本.js', saving: false });
 const scriptEditorHost = ref<HTMLElement | null>(null);
 const scriptEditorEditable = new Compartment();
+const scriptEditorLanguage = new Compartment();
 let scriptEditorView: EditorView | null = null;
 let syncingScriptFromEditor = false;
 function scriptFileId(item?: { path?: string }) {
@@ -345,18 +348,33 @@ function scriptDisplayName(item?: { name?: string; path?: string }) {
   return isNewScriptEntry(item) ? '新增脚本' : name;
 }
 
-function scriptFileName(item?: { name?: string; path?: string }) {
+function scriptFileName(item?: { name?: string; path?: string; type?: string; file?: string }) {
   if (!item) return '-';
   if (isNewScriptEntry(item)) return 'new-script.js';
   if ('file' in item && item.file) return item.file.split(/[\\/]/).pop() || 'main.js';
   const title = scriptDisplayName(item)
     .replace(/[🔧💫🔒👑]/gu, '')
     .trim();
-  return `${title || scriptFileId(item)}.js`;
+  const suffix = item.type === 'python' ? '.py' : '.js';
+  return `${title || scriptFileId(item)}${suffix}`;
 }
 
-function isNodeScript(item = currentScriptFile.value) {
-  return item?.type === 'node';
+function isFileScript(item = currentScriptFile.value) {
+  return item?.type === 'node' || item?.type === 'python';
+}
+
+function isPythonScript(item = currentScriptFile.value) {
+  return item?.type === 'python' || /\.py$/i.test(scriptFileName(item));
+}
+
+function scriptRuntimeLabel(item = currentScriptFile.value) {
+  if (item?.type === 'python' || isPythonScript(item)) return 'Python 3.12';
+  if (item?.type === 'node') return 'NodeJS';
+  return '旧脚本';
+}
+
+function scriptLanguageExtension() {
+  return isPythonScript() ? python() : javascript();
 }
 
 const scriptFileRows = computed(() => {
@@ -381,6 +399,13 @@ function syncScriptEditorEditable() {
   });
 }
 
+function syncScriptEditorLanguage() {
+  if (!scriptEditorView) return;
+  scriptEditorView.dispatch({
+    effects: scriptEditorLanguage.reconfigure(scriptLanguageExtension()),
+  });
+}
+
 function destroyScriptEditor() {
   scriptEditorView?.destroy();
   scriptEditorView = null;
@@ -400,7 +425,7 @@ function createScriptEditor() {
       doc: scriptState.content,
       extensions: [
         basicSetup,
-        javascript(),
+        scriptEditorLanguage.of(scriptLanguageExtension()),
         oneDark,
         EditorView.lineWrapping,
         scriptEditorEditable.of(scriptEditableExtension()),
@@ -415,6 +440,7 @@ async function ensureScriptEditor() {
   if (page.value === 'scripts') {
     createScriptEditor();
     syncScriptEditorEditable();
+    syncScriptEditorLanguage();
   } else {
     destroyScriptEditor();
   }
@@ -424,7 +450,7 @@ async function loadScript(id = currentScriptId.value) {
   if (!id) return;
   scriptState.loading = true;
   try {
-    if (isNodeScript()) {
+    if (isFileScript()) {
       const res = await get<ApiEnvelope<{ content: string }>>(`/api/admin/node/script?id=${encodeURIComponent(id)}`);
       scriptState.content = apiData(res)?.content || '';
     } else {
@@ -438,7 +464,7 @@ async function loadScript(id = currentScriptId.value) {
 
 async function saveScript(value = scriptState.content) {
   if (!currentScriptId.value) return;
-  if (isNodeScript()) {
+  if (isFileScript()) {
     await put('/api/admin/node/script', { id: currentScriptId.value, content: value });
   } else {
     await saveStorage({ [`plugins.${currentScriptId.value}`]: value }, currentScriptId.value);
@@ -449,6 +475,10 @@ async function saveScript(value = scriptState.content) {
 
 async function formatScript() {
   if (!scriptState.content.trim()) return;
+  if (isPythonScript()) {
+    message.warning('Python 格式化暂未内置，请保存前自行格式化。');
+    return;
+  }
   try {
     const [{ default: prettier }, { default: parserBabel }, { default: parserEstree }] = await Promise.all([
       import('prettier/standalone'),
@@ -472,7 +502,7 @@ async function formatScript() {
 
 async function removeScript() {
   if (!currentScriptId.value) return;
-  if (isNodeScript()) {
+  if (isFileScript()) {
     await del('/api/admin/node/script', { id: currentScriptId.value });
   } else {
     await saveStorage({ [`plugins.${currentScriptId.value}`]: 'uninstall' });
@@ -491,7 +521,7 @@ function normalizeCreateScriptFileName() {
   const fileName = scriptCreateState.fileName.trim();
   if (!fileName) return '';
   if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) return fileName;
-  return /\.js$/i.test(fileName) ? fileName : `${fileName}.js`;
+  return /\.(js|py)$/i.test(fileName) ? fileName : `${fileName}.js`;
 }
 
 async function createScript() {
@@ -504,8 +534,8 @@ async function createScript() {
     message.error('脚本文件名不合法');
     return;
   }
-  if (!/\.js$/i.test(fileName)) {
-    message.error('脚本文件名必须是 .js 文件');
+  if (!/\.(js|py)$/i.test(fileName)) {
+    message.error('脚本文件名必须是 .js 或 .py 文件');
     return;
   }
   scriptCreateState.saving = true;
@@ -520,15 +550,17 @@ async function createScript() {
   }
 }
 
-function selectScriptFile(item: { path?: string; name?: string }) {
+function selectScriptFile(item: { path?: string; name?: string; type?: string; file?: string }) {
   const id = scriptFileId(item);
   if (!id) return;
   navigate('scripts', `/admin/script/${id}`);
+  syncScriptEditorLanguage();
 }
 
 watch(currentScriptId, (id) => loadScript(id), { immediate: true });
 watch([page, () => booting.value, () => user.value], () => ensureScriptEditor(), { immediate: true });
 watch([currentScriptId, () => scriptState.loading], () => syncScriptEditorEditable());
+watch(currentScriptFile, () => syncScriptEditorLanguage());
 watch(
   () => scriptState.content,
   (content) => {
@@ -733,10 +765,11 @@ async function loadTasks(current = 1, pageSize = 20) {
 async function loadTaskSelects(taskId = '') {
   const res = await get<ApiEnvelope<{ scripts?: Record<string, string> }>>(`/api/admin/task/selects?task_id=${encodeURIComponent(taskId)}`);
   tasks.scripts = Object.entries(apiData(res)?.scripts || {})
-    .filter(([, label]) => String(label).endsWith('.js'))
+    .filter(([, label]) => /\.(js|py)$/i.test(String(label)))
     .map(([, label]) => {
-      const name = String(label).replace(/\.js$/, '');
-      return { value: `node ${name}.js`, label: `node ${name}.js` };
+      const text = String(label);
+      const runtime = /\.py$/i.test(text) ? 'python' : 'node';
+      return { value: `${runtime} ${text}`, label: `${runtime} ${text}` };
     });
 }
 async function openTask(row?: Task) {
@@ -1176,6 +1209,7 @@ type NodeDependencyPlugin = {
   title?: string;
   file?: string;
   path: string;
+  type?: string;
 };
 
 type NodeDependencyRow = {
@@ -1187,9 +1221,19 @@ type NodeDependencyRow = {
   plugin: string;
   plugin_title?: string;
   plugin_file?: string;
+  type?: string;
 };
 
+type DependencyRuntime = 'node' | 'python';
+type DependencyToolStatus = { available: boolean; path?: string; message?: string; registry?: string; target?: string };
+
+const dependencyRuntimeOptions = [
+  { label: 'NodeJS', value: 'node' },
+  { label: 'Python', value: 'python' },
+];
+
 const nodeDeps = reactive({
+  runtime: 'node' as DependencyRuntime,
   plugins: [] as NodeDependencyPlugin[],
   plugin: '',
   rows: [] as NodeDependencyRow[],
@@ -1199,19 +1243,38 @@ const nodeDeps = reactive({
   loading: false,
   saving: false,
   removing: {} as Record<string, boolean>,
-  pnpm: { available: false, path: '', message: '', registry: '' } as { available: boolean; path?: string; message?: string; registry?: string },
+  pnpm: { available: false, path: '', message: '', registry: '' } as DependencyToolStatus,
+  pipx: { available: false, path: '', message: '', registry: '', target: '' } as DependencyToolStatus,
 });
-async function loadNodeDependencies(plugin = '') {
+const currentDependencyTool = computed(() => nodeDeps.runtime === 'python' ? nodeDeps.pipx : nodeDeps.pnpm);
+const dependencyRuntimeLabel = computed(() => nodeDeps.runtime === 'python' ? 'Python' : 'NodeJS');
+const dependencySharedPath = computed(() => nodeDeps.runtime === 'python' ? '/data/plugins/python_packages/venvs/sillygirl-python-runtime' : '/data/plugins/node_modules');
+const dependencyRegistryLabel = computed(() => nodeDeps.runtime === 'python' ? 'pipx 源' : 'pnpm 镜像');
+const dependencyPackagePlaceholder = computed(() => nodeDeps.runtime === 'python' ? '依赖名，例如 requests 或 requests==2.32.0' : '依赖名，例如 axios 或 ipp@latest');
+const dependencyPluginOptions = computed(() => [
+  { label: `全部 ${dependencyRuntimeLabel.value} 插件`, value: '' },
+  ...nodeDeps.plugins.map((item) => ({ label: `${item.title || item.name} / ${item.file || scriptFileName(item)}`, value: item.name })),
+]);
+async function loadNodeDependencies(plugin = nodeDeps.plugin) {
   nodeDeps.loading = true;
   try {
-    const query = plugin ? `?plugin=${encodeURIComponent(plugin)}` : '';
-    const res = await get<ApiEnvelope<{ plugins: NodeDependencyPlugin[]; plugin: string; dependencies: NodeDependencyRow[]; pnpm: typeof nodeDeps.pnpm }>>(`/api/admin/node/dependencies${query}`);
+    const query = new URLSearchParams({ runtime: nodeDeps.runtime });
+    if (plugin) query.set('plugin', plugin);
+    const res = await get<ApiEnvelope<{
+      runtime: DependencyRuntime;
+      plugins: NodeDependencyPlugin[];
+      plugin: string;
+      dependencies: NodeDependencyRow[];
+      pnpm: DependencyToolStatus;
+      pipx: DependencyToolStatus;
+    }>>(`/api/admin/plugin/dependencies?${query.toString()}`);
     const data = apiData(res) || {};
     nodeDeps.plugins = data.plugins || [];
     nodeDeps.plugin = data.plugin || '';
     nodeDeps.rows = data.dependencies || [];
     nodeDeps.pnpm = data.pnpm || { available: false };
-    nodeDeps.registry = nodeDeps.pnpm.registry || 'https://registry.npmmirror.com';
+    nodeDeps.pipx = data.pipx || { available: false };
+    nodeDeps.registry = currentDependencyTool.value.registry || (nodeDeps.runtime === 'python' ? 'https://pypi.tuna.tsinghua.edu.cn/simple' : 'https://registry.npmmirror.com');
   } finally {
     nodeDeps.loading = false;
   }
@@ -1228,10 +1291,10 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
   }
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/node/dependency', { plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
+    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
     after?.();
     message.success('依赖已安装');
-    await loadNodeDependencies();
+    await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
   } finally {
@@ -1241,9 +1304,9 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
 async function installNodeDependencyRow(row: NodeDependencyRow) {
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/node/dependency', { plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
+    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
     message.success('依赖已安装');
-    await loadNodeDependencies();
+    await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
   } finally {
@@ -1251,12 +1314,12 @@ async function installNodeDependencyRow(row: NodeDependencyRow) {
   }
 }
 async function removeNodeDependency(row: NodeDependencyRow) {
-  const key = `${row.plugin}.${row.name}`;
+  const key = `${nodeDeps.runtime}.${row.plugin}.${row.name}`;
   nodeDeps.removing[key] = true;
   try {
-    await del('/api/admin/node/dependency', { plugin: row.plugin || '__shared__', package: row.name });
+    await del('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name });
     message.success('依赖已卸载');
-    await loadNodeDependencies();
+    await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖卸载失败');
   } finally {
@@ -1370,14 +1433,16 @@ const settingsKeys = [
   'telegram.api_base',
 ];
 async function loadSettings() {
-  const [res, githubProxyRes, pnpmRegistryRes] = await Promise.all([
+  const [res, githubProxyRes, pnpmRegistryRes, pipxRegistryRes] = await Promise.all([
     readStorage<Record<string, any>>(settingsKeys.join(',')),
     get<ApiEnvelope<{ proxy: string; options: string[] }>>('/api/admin/plugins/github-proxy').catch(() => ({ data: { proxy: '', options: [] } })),
     get<ApiEnvelope<{ registry: string }>>('/api/admin/node/dependency/registry').catch(() => ({ data: { registry: 'https://registry.npmmirror.com' } })),
+    get<ApiEnvelope<{ registry: string }>>('/api/admin/plugin/dependency/registry?runtime=python').catch(() => ({ data: { registry: 'https://pypi.tuna.tsinghua.edu.cn/simple' } })),
   ]);
   const data = apiData(res) || {};
   const githubProxyData = apiData(githubProxyRes) || { proxy: '', options: [] };
   const pnpmRegistryData = apiData(pnpmRegistryRes) || { registry: 'https://registry.npmmirror.com' };
+  const pipxRegistryData = apiData(pipxRegistryRes) || { registry: 'https://pypi.tuna.tsinghua.edu.cn/simple' };
   settings.githubProxyOptions = githubProxyData.options || [];
   settings.form = {
     name: data['sillyGirl.name'],
@@ -1394,6 +1459,7 @@ async function loadSettings() {
     telegram_api_base: data['telegram.api_base'] || 'https://api.telegram.org',
     github_proxy: githubProxyData.proxy || '',
     pnpm_registry: pnpmRegistryData.registry || 'https://registry.npmmirror.com',
+    pipx_registry: pipxRegistryData.registry || 'https://pypi.tuna.tsinghua.edu.cn/simple',
   };
 }
 async function saveSettings() {
@@ -1413,14 +1479,17 @@ async function saveSettings() {
   };
   if (v.password) updates['sillyGirl.password'] = v.password;
   await saveStorage(updates);
-  const [githubProxyRes, pnpmRegistryRes] = await Promise.all([
+  const [githubProxyRes, pnpmRegistryRes, pipxRegistryRes] = await Promise.all([
     put<ApiEnvelope<{ proxy?: string }>>('/api/admin/plugins/github-proxy', { proxy: String(v.github_proxy || '').trim() }),
     put<ApiEnvelope<{ registry?: string }>>('/api/admin/node/dependency/registry', { registry: String(v.pnpm_registry || '').trim() }),
+    put<ApiEnvelope<{ registry?: string }>>('/api/admin/plugin/dependency/registry', { runtime: 'python', registry: String(v.pipx_registry || '').trim() }),
   ]);
   settings.form.github_proxy = apiData(githubProxyRes)?.proxy || '';
   settings.form.pnpm_registry = apiData(pnpmRegistryRes)?.registry || settings.form.pnpm_registry;
-  nodeDeps.registry = settings.form.pnpm_registry;
+  settings.form.pipx_registry = apiData(pipxRegistryRes)?.registry || settings.form.pipx_registry;
   nodeDeps.pnpm.registry = settings.form.pnpm_registry;
+  nodeDeps.pipx.registry = settings.form.pipx_registry;
+  nodeDeps.registry = currentDependencyTool.value.registry || nodeDeps.registry;
   message.success('设置已保存');
   loadUser();
 }
@@ -1494,7 +1563,12 @@ watch([page, user], ([p]) => {
 watch(() => plugins.tab, () => loadPlugins());
 watch(() => plugins.klass, () => loadPlugins());
 watch(() => nodeDeps.plugin, (plugin) => {
-  if (page.value === 'dependencies' && plugin) loadNodeDependencies(plugin);
+  if (page.value === 'dependencies') loadNodeDependencies(plugin);
+});
+watch(() => nodeDeps.runtime, () => {
+  nodeDeps.plugin = '';
+  nodeDeps.packageName = '';
+  if (page.value === 'dependencies') loadNodeDependencies('');
 });
 watch(() => msgState.active, () => loadMessages());
 
@@ -1690,7 +1764,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                   </div>
                   <div ref="scriptEditorHost" class="code-editor script-code-editor" />
                   <div class="script-editor-status">
-                    <span>{{ isNodeScript() ? 'NodeJS' : '旧脚本' }}</span>
+                    <span>{{ scriptRuntimeLabel() }}</span>
                     <span>{{ scriptState.content.split('\n').length }} 行</span>
                     <span>{{ scriptState.content.length }} 字符</span>
                   </div>
@@ -1701,27 +1775,35 @@ function smallcatOpenids(record?: AdminUserRow) {
             <section v-if="page === 'dependencies'" class="panel">
               <div class="toolbar">
                 <div class="toolbar-left">
-                  <Typography.Text class="muted">共 {{ nodeDeps.plugins.length }} 个 NodeJS 脚本插件，依赖共享到 /data/plugins/node_modules</Typography.Text>
-                  <Typography.Text class="muted">pnpm 镜像：{{ nodeDeps.registry }}</Typography.Text>
-                  <Typography.Text v-if="nodeDeps.pnpm.message" type="danger">{{ nodeDeps.pnpm.message }}</Typography.Text>
+                  <Typography.Text class="muted">共 {{ nodeDeps.plugins.length }} 个 {{ dependencyRuntimeLabel }} 脚本插件，依赖共享到 {{ dependencySharedPath }}</Typography.Text>
+                  <Typography.Text class="muted">{{ dependencyRegistryLabel }}：{{ nodeDeps.registry }}</Typography.Text>
+                  <Typography.Text v-if="currentDependencyTool.message" type="danger">{{ currentDependencyTool.message }}</Typography.Text>
                 </div>
                 <div class="toolbar-right">
                   <Button @click="loadNodeDependencies()"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 </div>
               </div>
               <div class="toolbar-left" style="margin-bottom: 12px">
+                <Segmented v-model:value="nodeDeps.runtime" :options="dependencyRuntimeOptions" />
+                <Select
+                  v-model:value="nodeDeps.plugin"
+                  style="width: 260px"
+                  show-search
+                  :options="dependencyPluginOptions"
+                  option-filter-prop="label"
+                />
                 <Input
                   v-model:value="nodeDeps.packageName"
                   style="width: 320px"
-                  placeholder="依赖名，例如 axios 或 ipp@latest"
+                  :placeholder="dependencyPackagePlaceholder"
                   @press-enter="installNodeDependency"
                 />
-                <Switch v-model:checked="nodeDeps.dev" checked-children="Dev" un-checked-children="Prod" />
-                <Button type="primary" :disabled="!nodeDeps.pnpm.available" :loading="nodeDeps.saving" @click="installNodeDependency">
+                <Switch v-if="nodeDeps.runtime === 'node'" v-model:checked="nodeDeps.dev" checked-children="Dev" un-checked-children="Prod" />
+                <Button type="primary" :disabled="!currentDependencyTool.available" :loading="nodeDeps.saving" @click="installNodeDependency">
                   <template #icon><Download :size="16" /></template>安装依赖
                 </Button>
               </div>
-              <Table :row-key="(row:any) => `${row.plugin}.${row.name}`" :loading="nodeDeps.loading" :data-source="nodeDeps.rows" :pagination="{ pageSize: 20 }">
+              <Table :row-key="(row:any) => `${row.type || nodeDeps.runtime}.${row.plugin}.${row.name}`" :loading="nodeDeps.loading" :data-source="nodeDeps.rows" :pagination="{ pageSize: 20 }">
                 <Table.Column title="#" :width="64">
                   <template #default="{ index }">{{ index + 1 }}</template>
                 </Table.Column>
@@ -1729,7 +1811,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <template #default="{ record }"><Typography.Text>{{ record.plugin_title || record.plugin }}</Typography.Text></template>
                 </Table.Column>
                 <Table.Column title="文件名" :width="140">
-                  <template #default="{ record }"><Typography.Text class="mono">{{ record.plugin_file || 'main.js' }}</Typography.Text></template>
+                  <template #default="{ record }"><Typography.Text class="mono">{{ record.plugin_file || (nodeDeps.runtime === 'python' ? 'main.py' : 'main.js') }}</Typography.Text></template>
                 </Table.Column>
                 <Table.Column title="依赖名称" data-index="name" />
                 <Table.Column title="版本" data-index="version" :width="180">
@@ -1740,13 +1822,13 @@ function smallcatOpenids(record?: AdminUserRow) {
                 </Table.Column>
                 <Table.Column title="来源" data-index="source" :width="150" />
                 <Table.Column title="类型" :width="100">
-                  <template #default="{ record }"><Tag :color="record.dev ? 'blue' : 'green'">{{ record.dev ? 'dev' : 'prod' }}</Tag></template>
+                  <template #default="{ record }"><Tag :color="nodeDeps.runtime === 'python' ? 'purple' : (record.dev ? 'blue' : 'green')">{{ nodeDeps.runtime === 'python' ? 'pipx' : (record.dev ? 'dev' : 'prod') }}</Tag></template>
                 </Table.Column>
                 <Table.Column title="操作" :width="130">
                   <template #default="{ record }">
-                    <Button v-if="!record.installed" type="link" :disabled="!nodeDeps.pnpm.available" :loading="nodeDeps.saving" @click="installNodeDependencyRow(record)">安装</Button>
+                    <Button v-if="!record.installed" type="link" :disabled="!currentDependencyTool.available" :loading="nodeDeps.saving" @click="installNodeDependencyRow(record)">安装</Button>
                     <Popconfirm v-else title="确认卸载这个依赖？" @confirm="removeNodeDependency(record)">
-                      <Button type="text" danger :loading="nodeDeps.removing[`${record.plugin}.${record.name}`]"><Trash2 :size="16" /></Button>
+                      <Button type="text" danger :loading="nodeDeps.removing[`${nodeDeps.runtime}.${record.plugin}.${record.name}`]"><Trash2 :size="16" /></Button>
                     </Popconfirm>
                   </template>
                 </Table.Column>
@@ -2228,6 +2310,9 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Form.Item label="pnpm 镜像" extra="用于安装和更新脚本插件的 NodeJS 依赖。">
                   <Input v-model:value="settings.form.pnpm_registry" placeholder="https://registry.npmmirror.com" />
                 </Form.Item>
+                <Form.Item label="pipx 源" extra="用于安装 Python 脚本插件依赖。">
+                  <Input v-model:value="settings.form.pipx_registry" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple" />
+                </Form.Item>
                 <Typography.Title :level="5">Telegram Bot</Typography.Title>
                 <Form.Item label="Token" extra="BotFather 提供的 Bot Token，保存后 Telegram 适配器会自动重启。">
                   <Input.Password v-model:value="settings.form.telegram_token" placeholder="123456:ABC-DEF..." />
@@ -2280,8 +2365,8 @@ function smallcatOpenids(record?: AdminUserRow) {
         @ok="createScript"
       >
         <Form layout="vertical">
-          <Form.Item label="脚本文件名" required extra="会创建为 /data/plugins/文件名.js；不填写后缀会自动补全 .js。">
-            <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js" @press-enter="createScript" />
+          <Form.Item label="脚本文件名" required extra="会创建为 /data/plugins/文件名.js 或 .py；不填写后缀会自动补全 .js。">
+            <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js 或 daily-sign.py" @press-enter="createScript" />
           </Form.Item>
         </Form>
       </Modal>
@@ -2295,7 +2380,7 @@ function smallcatOpenids(record?: AdminUserRow) {
       </Modal>
 
       <Modal :open="!!tasks.editing" title="定时任务" width="640px" @cancel="tasks.editing = null" @ok="saveTask">
-        <Form layout="vertical"><Form.Item label="标题" required help="定时任务标题不能为空"><Input v-model:value="tasks.form.title" placeholder="例如：每小时检查 IP" /></Form.Item><Form.Item label="Cron 表达式" required help="例如：0 * * * *，也支持带秒字段的 6 段表达式"><Input v-model:value="tasks.form.schedule" placeholder="0 * * * *" /></Form.Item><Form.Item label="触发命令"><Select v-model:value="tasks.form.command" show-search :options="tasks.scripts" placeholder="node xxx.js" /></Form.Item><Form.Item label="启用"><Switch v-model:checked="tasks.form.enable" /></Form.Item></Form>
+        <Form layout="vertical"><Form.Item label="标题" required help="定时任务标题不能为空"><Input v-model:value="tasks.form.title" placeholder="例如：每小时检查 IP" /></Form.Item><Form.Item label="Cron 表达式" required help="例如：0 * * * *，也支持带秒字段的 6 段表达式"><Input v-model:value="tasks.form.schedule" placeholder="0 * * * *" /></Form.Item><Form.Item label="触发命令"><Select v-model:value="tasks.form.command" show-search :options="tasks.scripts" placeholder="node xxx.js 或 python xxx.py" /></Form.Item><Form.Item label="启用"><Switch v-model:checked="tasks.form.enable" /></Form.Item></Form>
       </Modal>
 
       <Modal :open="!!carry.editing" title="搬运群组" width="820px" @cancel="carry.editing = null" @ok="saveCarry">

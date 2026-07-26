@@ -12,7 +12,7 @@ export type ApiResult<T = unknown> = {
 export type CurrentUser = {
   name?: string;
   avatar?: string;
-  plugins?: Array<{ path: string; name: string; create_at?: string; type?: string; file?: string; plugin?: string }>;
+  plugins?: Array<{ path: string; name: string; create_at?: string; type?: 'node' | 'python' | string; file?: string; plugin?: string }>;
   adapters?: AdapterStatus[];
   integrations?: Record<string, IntegrationStatus>;
   user_stats?: UserStats;

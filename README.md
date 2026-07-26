@@ -57,7 +57,7 @@ docker compose logs -f
 
 ## 插件编写
 
-插件是普通 JavaScript 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名.js` 使用 NodeJS 运行。容器内对应路径是 `/data/plugins/插件名.js`。
+插件是普通 JavaScript 或 Python 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名.js` 或 `plugins/插件名.py` 运行。容器内对应路径是 `/data/plugins/插件名.js` 或 `/data/plugins/插件名.py`。
 
 ```js
 /**
@@ -68,6 +68,27 @@ docker compose logs -f
  */
 
 s.reply("Hello World!");
+```
+
+Python 插件使用 Python 3.12 运行，SDK 通过 `from sillygirl import ...` 引入。异步 API 需要 `await`：
+
+```python
+"""
+* @title PythonHello
+* @rule raw ^py你好$
+* @version v1.0.0
+* @author custom
+"""
+
+import asyncio
+from sillygirl import sender as s
+
+
+async def main():
+    await s.reply("Hello from Python!")
+
+
+asyncio.run(main())
 ```
 
 元数据必填规则：
@@ -92,6 +113,7 @@ s.reply("Hello World!");
 | `@version 版本号` | 非必填 | 插件版本，默认 `v1.0.0` |
 | `@author 作者` | 非必填 | 作者名 |
 | `@desc 描述` | 非必填 | 插件说明，显示在后台或插件市场 |
+| `@depe ["依赖名"]` | 非必填 | 插件依赖声明；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
 | `@icon URL` | 非必填 | 插件图标 URL |
 | `@public true/false` | 非必填 | 是否允许公开到插件市场，默认 `false` |
 | `@origin 来源` | 非必填 | 插件来源标记，默认 `自定义` |
@@ -102,7 +124,7 @@ s.reply("Hello World!");
 | `@on_start true/false` | 启动脚本必填 | 是否在程序启动时执行一次 |
 | `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |
 
-如果脚本已经写了 `@cron`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
+如果脚本已经写了 `@cron`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 或 `python 插件名.py` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
 
 规则支持占位捕获：
 
@@ -338,18 +360,19 @@ task.remove(ret.id);
 | 功能 | 说明 |
 |------|------|
 | 管理面板 | Vue 管理后台，支持脚本、插件市场、配置、存储、任务等管理 |
-| 脚本插件 | 支持 JS 代码高亮、格式化、文件管理和在线编辑 |
+| 脚本插件 | 支持 JS/Python 代码高亮、文件管理和在线编辑；JS 支持格式化 |
 | 插件市场 | 支持管理插件源，从 GitHub 仓库 `plugins/` 目录导入插件 |
 | 插件配置 | 支持 `sillyGirlCreateSchema` / `new SillyGirlPluginConfig(schema)` / `form(schema)` 声明式配置表单 |
-| 依赖管理 | 使用 pnpm 管理 NodeJS 插件共享依赖，安装到 `/data/plugins/package.json` 和 `/data/plugins/node_modules` |
+| 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从插件注释 `@depe ["包名"]` 读取 |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
+| Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx 和 gRPC 依赖 |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 搬运 | 可按平台和群号把消息交给指定插件脚本处理，业务过滤和转发由脚本自行实现 |
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
 | 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
 | 适配器 | 内置 QQ、Telegram Bot、Web 适配器，并提供 Pagermaid 桥接脚本 |
-| 定时任务 | 支持 Cron 表达式和脚本触发 |
+| 定时任务 | 支持 Cron 表达式、`node 插件名.js` 和 `python 插件名.py` 脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |
 
 后台首次访问规则：

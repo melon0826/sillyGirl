@@ -193,7 +193,7 @@ func nodePluginNameIndexByUUID() map[string]string {
 			index[nameUuid(file.Name())] = file.Name()
 			continue
 		}
-		if strings.EqualFold(filepath.Ext(file.Name()), ".js") && file.Name() != "demo.main.js" {
+		if (strings.EqualFold(filepath.Ext(file.Name()), ".js") && file.Name() != "demo.main.js") || strings.EqualFold(filepath.Ext(file.Name()), ".py") {
 			name := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
 			index[nameUuid(name)] = name
 		}
