@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -80,7 +81,6 @@ const pythonProtobufRuntimeDependency = "protobuf==7.35.1"
 
 var nodeSillygirlRuntimeDependencies = map[string]string{
 	"@grpc/grpc-js":   "^1.8.18",
-	"express":         "^4.21.2",
 	"google-protobuf": "^3.21.2",
 }
 
@@ -92,6 +92,11 @@ var pythonPipxRuntimeDependencies = []string{
 var nodePnpmOnlyBuiltDependencies = []string{
 	"protobufjs",
 }
+
+var pythonRuntimeEnvCache = struct {
+	sync.Mutex
+	ready bool
+}{}
 
 func init() {
 	GinApi(GET, "/api/admin/plugin/dependencies", RequireAuth, handlePluginDependencies)
@@ -295,6 +300,7 @@ func handleSetPluginDependencyRegistry(ctx *gin.Context) {
 			return
 		}
 		sillyGirl.Set("pipx_registry", registry)
+		invalidatePipxRuntimeEnvCache()
 		ApiOK(ctx, map[string]string{"registry": registry})
 		return
 	}
@@ -1423,7 +1429,11 @@ func installPythonDependency(pluginName, pkg string) (string, error) {
 	if err := ensurePipxRuntimeEnv(); err != nil {
 		return "", err
 	}
-	return runPipx([]string{"runpip", pythonPipxRuntimePackage, "install", "--upgrade", "--no-cache-dir", pkg}, pipxInstallEnv())
+	output, err := runPipx([]string{"runpip", pythonPipxRuntimePackage, "install", "--upgrade", "--no-cache-dir", pkg}, pipxInstallEnv())
+	if err == nil {
+		invalidatePipxRuntimeEnvCache()
+	}
+	return output, err
 }
 
 func removeNodeDependency(pluginName, pkg string) (string, error) {
@@ -1458,6 +1468,7 @@ func removePythonDependency(pluginName, pkg string) (string, error) {
 		}
 		return output, err
 	}
+	invalidatePipxRuntimeEnvCache()
 	return output, nil
 }
 
@@ -1574,6 +1585,25 @@ func extractJSONList(output string) string {
 }
 
 func ensurePipxRuntimeEnv() error {
+	pythonRuntimeEnvCache.Lock()
+	defer pythonRuntimeEnvCache.Unlock()
+	if pythonRuntimeEnvCache.ready {
+		return nil
+	}
+	if err := ensurePipxRuntimeEnvUncached(); err != nil {
+		return err
+	}
+	pythonRuntimeEnvCache.ready = true
+	return nil
+}
+
+func invalidatePipxRuntimeEnvCache() {
+	pythonRuntimeEnvCache.Lock()
+	pythonRuntimeEnvCache.ready = false
+	pythonRuntimeEnvCache.Unlock()
+}
+
+func ensurePipxRuntimeEnvUncached() error {
 	if _, err := ensurePythonPackagesDir(); err != nil {
 		return err
 	}

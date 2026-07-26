@@ -1,4 +1,3 @@
-declare const express: () => void;
 declare class Sender {
     private uuid;
     private destoried;
@@ -306,4 +305,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console, express, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console, };

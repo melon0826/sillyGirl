@@ -141,7 +141,7 @@ asyncio.run(main())
 | 普通消息插件 | `@title`、`@rule` | `@rule` 用来匹配消息，不写规则就不会被普通消息触发 |
 | 搬运处理脚本 | `@title`、`@carry` | 搬运页的“处理脚本”只展示带 `@carry` 或 `@carry true` 的插件 |
 | 启动脚本 | `@title`、`@on_start true` | 程序启动时执行一次 |
-| Web 服务脚本 | `@title`、`@web true` | 程序启动时常驻运行，脚本自己用 Express 监听端口 |
+| Web 服务脚本 | `@title`、`@web true` | 程序启动时常驻运行，脚本自己监听端口 |
 | 脚本定时任务 | `@title`、`@cron 表达式` | 写了 `@cron` 的脚本会直接显示在 Admin 面板「定时任务」 |
 | 纯模块/工具脚本 | `@title`、`@module true` | 只作为模块或工具文件，不参与普通消息匹配 |
 
@@ -165,7 +165,7 @@ asyncio.run(main())
 | `@carry` 或 `@carry true/false` | 搬运脚本必填 | 是否可作为搬运处理脚本；写 `@carry` 等同于 `@carry true`，默认 `false` |
 | `@cron 表达式` | 脚本定时任务必填 | 声明脚本定时任务，例如 `@cron 0 * * * *`；只支持直接写 Cron 表达式 |
 | `@on_start true/false` | 启动脚本必填 | 是否在程序启动时执行一次 |
-| `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |
+| `@web true/false` | Web 服务脚本必填 | 是否作为 Web 常驻脚本启动；端口和路由由脚本自己处理 |
 
 如果脚本已经写了 `@cron`，它会自动展示到「定时任务」列表；如果在「定时任务」里选择 `node 插件名.js` 或 `python 插件名.py` 创建任务，系统会把 Cron 表达式写回该脚本头部注释，而不是额外创建一份重复任务。
 
@@ -232,14 +232,53 @@ Web 服务脚本：
  * @class 工具
  */
 
-const { express } = require("sillygirl");
+const http = require("http");
 
-const app = express();
-app.use(express.json());
-app.get("/health", (req, res) => {
-  res.json({ status: true, message: "ok" });
-});
-app.listen(3001, () => console.log("web plugin listening on 3001"));
+http
+  .createServer((req, res) => {
+    if (req.url !== "/health") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ status: true, message: "ok", data: null }));
+  })
+  .listen(3001, () => console.log("web plugin listening on 3001"));
+```
+
+Python Web 服务脚本：
+
+```python
+"""
+* @title PythonWeb示例
+* @web true
+* @class 工具
+"""
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/health":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        body = json.dumps(
+            {"status": True, "message": "ok", "data": None},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+HTTPServer(("0.0.0.0", 3002), Handler).serve_forever()
 ```
 
 持久化存储：

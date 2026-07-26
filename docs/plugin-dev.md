@@ -335,7 +335,7 @@ if (content === "你好") {
 
 ### Web 服务脚本
 
-`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件通常使用 Express；Python 插件可以使用 Python HTTP 框架或标准库自行监听。
+`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件可以使用内置 `http` 模块或通过 `@depe` 自行声明 Web 框架；Python 插件可以使用 Python HTTP 框架或标准库自行监听。
 
 ```js
 /**
@@ -344,14 +344,19 @@ if (content === "你好") {
  * @class 工具
  */
 
-const { express } = require("sillygirl");
+const http = require("http");
 
-const app = express();
-app.use(express.json());
-app.get("/health", (req, res) => {
-  res.json({ status: true, message: "ok" });
-});
-app.listen(3001, () => console.log("web plugin listening on 3001"));
+http
+  .createServer((req, res) => {
+    if (req.url !== "/health") {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ status: true, message: "ok", data: null }));
+  })
+  .listen(3001, () => console.log("web plugin listening on 3001"));
 ```
 
 ## 搬运处理脚本

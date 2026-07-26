@@ -521,13 +521,6 @@ const nodeRuntimePreloadScript = `
   sg.SillyGirlPluginConfig = sg.SillyGirlPluginConfig || SillyGirlPluginConfig;
   sg.form = sg.form || form;
   sg.pluginConfigDefaults = sg.pluginConfigDefaults || collectSchemaDefaults;
-  if (!sg.express) {
-    Object.defineProperty(sg, "express", {
-      enumerable: true,
-      configurable: true,
-      get: function () { return require("express"); },
-    });
-  }
   globalThis.QingLong = sg.QingLong;
   globalThis.SmallCat = sg.SmallCat;
   globalThis.DaiDai = sg.DaiDai;
@@ -537,10 +530,5 @@ const nodeRuntimePreloadScript = `
   globalThis.pluginConfigDefaults = sg.pluginConfigDefaults;
   globalThis.restart = sg.restart;
   globalThis.update = sg.update;
-  Object.defineProperty(globalThis, "express", {
-    enumerable: true,
-    configurable: true,
-    get: function () { return sg.express; },
-  });
 })();
 `

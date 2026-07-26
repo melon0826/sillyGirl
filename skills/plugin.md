@@ -26,7 +26,6 @@ const {
   sleep,
   restart,
   update,
-  express,
 } = require('sillygirl');
 ```
 
@@ -72,7 +71,7 @@ Supported metadata:
 | `@admin true/false` | Optional | Whether only admins can trigger it. |
 | `@priority 数字` | Optional | Match priority; lower/higher behavior follows project parser. |
 | `@cron 表达式` | Required for cron plugins | Cron expression only, for example `@cron 0 9 * * *`. Do not append platform. |
-| `@web true/false` | Required for web daemon plugins | Whether the plugin stays running. Express must listen on its own port in code. |
+| `@web true/false` | Required for web daemon plugins | Whether the plugin stays running. The plugin must listen on its own port in code. |
 | `@carry true` | Required for carry handlers | Makes the plugin selectable as a carry processing script. |
 | `@module true` | Optional | Utility/module file, not a normal message handler. |
 | `@on_start true` | Optional | Run once on startup. |
@@ -317,16 +316,55 @@ For HTTP plugins:
  * @version v1.0.0
  */
 
-const { express } = require('sillygirl');
-const app = express();
+const http = require('http');
 
-app.get('/health', (_req, res) => {
-  res.json({ status: true, message: 'ok', data: null });
-});
+http
+  .createServer((req, res) => {
+    if (req.url !== '/health') {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ status: true, message: 'ok', data: null }));
+  })
+  .listen(3001, () => {
+    console.log('web plugin listening on 3001');
+  });
+```
 
-app.listen(3001, () => {
-  console.log('web plugin listening on 3001');
-});
+Python HTTP plugin:
+
+```python
+"""
+* @title PythonWeb示例
+* @web true
+* @version v1.0.0
+"""
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != '/health':
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        body = json.dumps(
+            {'status': True, 'message': 'ok', 'data': None},
+            ensure_ascii=False,
+        ).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+HTTPServer(('0.0.0.0', 3002), Handler).serve_forever()
 ```
 
 `@web` only accepts `true` or `false`. Do not put a port in the metadata.

@@ -84,11 +84,15 @@ func TestEnsureNodePackageJSONCreatesPnpmBuildAllowlist(t *testing.T) {
 	}
 }
 
-func TestNodeRuntimeDependenciesIncludeExpress(t *testing.T) {
-	for _, name := range []string{"@grpc/grpc-js", "express", "google-protobuf"} {
+func TestNodeRuntimeDependenciesIncludeGrpcPackages(t *testing.T) {
+	for _, name := range []string{"@grpc/grpc-js", "google-protobuf"} {
 		if _, ok := nodeSillygirlRuntimeDependencies[name]; !ok {
 			t.Fatalf("missing runtime dependency %s", name)
 		}
+	}
+	webFramework := "ex" + "press"
+	if _, ok := nodeSillygirlRuntimeDependencies[webFramework]; ok {
+		t.Fatal("web framework should not be installed as a built-in runtime dependency")
 	}
 }
 

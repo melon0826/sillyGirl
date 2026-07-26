@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.express = exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
+exports.console = exports.utils = exports.sender = exports.SillyGirlPluginConfig = exports.sillyGirlCreateSchema = exports.DaiDai = exports.SmallCat = exports.QingLong = exports.Bucket = exports.Adapter = void 0;
 exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.pushAdmin = pushAdmin;
@@ -54,15 +54,6 @@ let plugin_id = process.env?.PLUGIN_ID ?? "";
 const metadata = new grpc_1.Metadata();
 metadata.add("RUNTIME_ID", process.env?.RUNTIME_ID ?? "");
 metadata.add("sillygirl-runtime-token", process.env?.SILLYGIRL_GRPC_TOKEN ?? "");
-const express = new Proxy(function () { }, {
-    apply(_target, thisArg, args) {
-        return require("express").apply(thisArg, args);
-    },
-    get(_target, prop) {
-        return require("express")[prop];
-    },
-});
-exports.express = express;
 class Sender {
     uuid;
     destoried = false;

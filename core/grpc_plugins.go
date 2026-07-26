@@ -664,8 +664,7 @@ declare let console: {
 	error(...args: any[]): void;
 	debug(...args: any[]): void;
 };
-declare let express: any;
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console, express };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console };
 `
 
 func defaultScript(title string) string {
@@ -688,7 +687,6 @@ const {
   pushAdmin,
   restart,
   update,
-  express,
   utils: { buildCQTag, image, video },
 } = require("sillygirl");
 `

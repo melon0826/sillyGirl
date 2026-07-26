@@ -46,7 +46,7 @@ RUN apt-get update \
     && cd /app/node-runtime \
     && printf '{"name":"sillygirl-node-runtime","private":true,"version":"1.0.0"}\n' > package.json \
     && printf 'packages:\n  - .\nallowBuilds:\n  protobufjs: true\n' > pnpm-workspace.yaml \
-    && pnpm --allow-build=protobufjs add @grpc/grpc-js@^1.8.18 express@^4.21.2 google-protobuf@^3.21.2 \
+    && pnpm --allow-build=protobufjs add @grpc/grpc-js@^1.8.18 google-protobuf@^3.21.2 \
     && mkdir -p /data/plugins /data/conf \
     && python3.12 -m pip install --no-cache-dir pipx \
     && mkdir -p /tmp/sillygirl-python-runtime/sillygirl_python_runtime \
