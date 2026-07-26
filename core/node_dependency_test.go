@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,44 @@ func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
 	}
 	if !names["ipp"] {
 		t.Fatalf("missing dependency ipp in %#v", deps)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]interface{}{}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	pnpm, ok := manifest["pnpm"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing pnpm settings in %s", string(data))
+	}
+	if !jsonArrayContainsString(pnpm["onlyBuiltDependencies"], "protobufjs") {
+		t.Fatalf("missing protobufjs onlyBuiltDependencies in %#v", pnpm["onlyBuiltDependencies"])
+	}
+}
+
+func TestEnsureNodePackageJSONCreatesPnpmBuildAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureNodePackageJSON(dir, "new-plugin"); err != nil {
+		t.Fatalf("ensureNodePackageJSON returned error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := map[string]interface{}{}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	pnpm, ok := manifest["pnpm"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("missing pnpm settings in %s", string(data))
+	}
+	if !jsonArrayContainsString(pnpm["onlyBuiltDependencies"], "protobufjs") {
+		t.Fatalf("missing protobufjs onlyBuiltDependencies in %#v", pnpm["onlyBuiltDependencies"])
 	}
 }
 
@@ -88,4 +127,17 @@ func TestNormalizeNodeScriptFileName(t *testing.T) {
 			t.Fatalf("normalizeNodeScriptFileName(%q) = %q, want %q", tt.name, got, tt.want)
 		}
 	}
+}
+
+func jsonArrayContainsString(value interface{}, want string) bool {
+	items, ok := value.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

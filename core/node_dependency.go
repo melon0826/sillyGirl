@@ -44,6 +44,11 @@ type nodeDependencyManifest struct {
 	Private         bool              `json:"private"`
 	Dependencies    map[string]string `json:"dependencies"`
 	DevDependencies map[string]string `json:"devDependencies"`
+	Pnpm            nodePnpmSettings  `json:"pnpm,omitempty"`
+}
+
+type nodePnpmSettings struct {
+	OnlyBuiltDependencies []string `json:"onlyBuiltDependencies,omitempty"`
 }
 
 type nodeDependencyRequest struct {
@@ -69,6 +74,10 @@ var nodeSillygirlRuntimeDependencies = map[string]string{
 	"@grpc/grpc-js":   "^1.8.18",
 	"express":         "^4.21.2",
 	"google-protobuf": "^3.21.2",
+}
+
+var nodePnpmOnlyBuiltDependencies = []string{
+	"protobufjs",
 }
 
 func init() {
@@ -770,6 +779,9 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 		Version:      "1.0.0",
 		Private:      true,
 		Dependencies: nodeSillygirlRuntimeDependencyCopy(),
+		Pnpm: nodePnpmSettings{
+			OnlyBuiltDependencies: nodePnpmOnlyBuiltDependencyCopy(),
+		},
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -888,6 +900,11 @@ func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, err
 		}
 	}
 	manifest["dependencies"] = dependencies
+	pnpm, pnpmChanged := normalizeNodePackagePnpmSettings(manifest["pnpm"])
+	if pnpmChanged {
+		manifest["pnpm"] = pnpm
+		changed = true
+	}
 	if !changed {
 		return data, false, nil
 	}
@@ -921,6 +938,57 @@ func normalizeNodePackageDependencyField(value interface{}) (map[string]string, 
 		normalized[name] = text
 	}
 	return normalized, changed
+}
+
+func nodePnpmOnlyBuiltDependencyCopy() []string {
+	values := make([]string, len(nodePnpmOnlyBuiltDependencies))
+	copy(values, nodePnpmOnlyBuiltDependencies)
+	return values
+}
+
+func normalizeNodePackagePnpmSettings(value interface{}) (map[string]interface{}, bool) {
+	settings, ok := value.(map[string]interface{})
+	if !ok {
+		settings = map[string]interface{}{}
+	}
+	changed := !ok
+	existing := map[string]bool{}
+	list := []interface{}{}
+	switch raw := settings["onlyBuiltDependencies"].(type) {
+	case []interface{}:
+		for _, item := range raw {
+			text := strings.TrimSpace(fmt.Sprint(item))
+			if text == "" || text == "<nil>" || existing[text] {
+				changed = true
+				continue
+			}
+			existing[text] = true
+			list = append(list, text)
+		}
+	case []string:
+		for _, item := range raw {
+			text := strings.TrimSpace(item)
+			if text == "" || existing[text] {
+				changed = true
+				continue
+			}
+			existing[text] = true
+			list = append(list, text)
+		}
+	case nil:
+		changed = true
+	default:
+		changed = true
+	}
+	for _, name := range nodePnpmOnlyBuiltDependencies {
+		if !existing[name] {
+			existing[name] = true
+			list = append(list, name)
+			changed = true
+		}
+	}
+	settings["onlyBuiltDependencies"] = list
+	return settings, changed
 }
 
 func safePackageName(name string) string {

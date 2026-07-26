@@ -69,6 +69,7 @@ export type PluginInfo = {
   title: string;
   suffix?: string;
   desc?: string;
+  rule?: string;
   version?: string;
   author?: string;
   icon?: string;

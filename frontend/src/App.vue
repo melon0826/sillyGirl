@@ -1051,6 +1051,24 @@ function pluginClassTags(row: PluginInfo) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+function pluginTriggerText(row: PluginInfo) {
+  const rule = String(row.rule || '').trim();
+  if (!rule) return '';
+  return rule
+    .replace(/^\^\\s\*\(?/, '')
+    .replace(/\)?\\s\*\$$/, '')
+    .replace(/^\^/, '')
+    .replace(/\$$/, '')
+    .replace(/\(\?:/g, '(')
+    .replace(/^\((.*)\)$/, '$1')
+    .replace(/\[Jj\]/g, 'J')
+    .replace(/\[Dd\]/g, 'D')
+    .replace(/\|/g, ' / ')
+    .replace(/\\s\*/g, ' ')
+    .replace(/\\s\+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || rule;
+}
 async function openPluginSourceManager() {
   plugins.sourceModal = true;
   await loadPluginSources();
@@ -2091,6 +2109,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                     <Space direction="vertical" size="small">
                       <Space wrap>
                         <Typography.Text strong>{{ record.title || record.id }}</Typography.Text>
+                        <Tag v-if="pluginTriggerText(record)">口令 {{ pluginTriggerText(record) }}</Tag>
                         <Tag v-if="record.status === 1" color="green">可更新</Tag>
                       </Space>
                       <Typography.Text class="muted">{{ record.desc || '无描述' }}</Typography.Text>
@@ -2100,7 +2119,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                         <Tag v-if="record.status === 1" color="green">新版本 {{ record.latest_version || record.version || '-' }} / 当前 {{ record.current_version || '-' }}</Tag>
                         <Tag v-else-if="record.version">{{ record.version }}</Tag>
                         <Tag v-for="klass in pluginClassTags(record)" :key="klass" color="cyan">{{ klass }}</Tag>
-                        <Tag v-if="record.author">{{ record.author }}</Tag>
                         <Tag v-if="record.organization" color="blue">{{ record.organization }}</Tag>
                         <Tag v-if="record.running" color="green">运行中</Tag>
                         <Tag v-if="record.disable" color="red">禁用</Tag>

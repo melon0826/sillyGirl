@@ -16,6 +16,7 @@ type Function struct {
 	Type           string                   `json:"type"`   //脚本类型
 	Suffix         string                   `json:"suffix"` //脚本后缀
 	Description    string                   `json:"desc"`
+	Rule           string                   `json:"rule,omitempty"`
 	Public         bool                     `json:"public"`
 	Icon           string                   `json:"icon"`
 	Version        string                   `json:"version"`
