@@ -49,6 +49,12 @@ docker compose up -d
 docker compose logs -f
 ```
 
+## 界面预览
+
+### 后台管理
+
+![SillyGirl 后台管理](docs/images/admin-page.png)
+
 ## 插件编写
 
 插件是普通 JavaScript 文件，通过头部注释声明名称、规则、版本等元数据。脚本插件可以在 Admin 面板「脚本插件」里编辑，也可以放到 `plugins/插件名.js` 使用 NodeJS 运行。容器内对应路径是 `/data/plugins/插件名.js`。

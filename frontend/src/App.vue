@@ -163,8 +163,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.1.1',
-    remote: info.remote || info.local || '0.1.1',
+    local: info.local || '0.1.2',
+    remote: info.remote || info.local || '0.1.2',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -912,6 +912,12 @@ async function loadSmallcatPanels() {
   } finally {
     smallcat.loading = false;
   }
+}
+function smallcatQuotaText(record: SmallcatPanel) {
+  const used = `${record.account_used || ''}`.trim();
+  const limit = `${record.account_limit || ''}`.trim();
+  if (used && limit) return `${used} / ${limit}`;
+  return used || limit || '-';
 }
 function openSmallcatPanel(row?: SmallcatPanel) {
   const data = row || { name: '', address: '', api_auth: '' };
@@ -1991,6 +1997,21 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <template #default="{ record }">
                     <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '验证通过' : '未检测' }}</Tag>
                   </template>
+                </Table.Column>
+                <Table.Column title="用户组" data-index="group" :width="130">
+                  <template #default="{ record }">
+                    <Tag :color="record.group === 'VIP' ? 'gold' : record.group === 'PRO' ? 'blue' : record.group ? 'green' : 'default'">
+                      {{ record.group || '-' }}
+                    </Tag>
+                  </template>
+                </Table.Column>
+                <Table.Column title="积分" data-index="credit_balance" :width="110">
+                  <template #default="{ text }">
+                    <Typography.Text>{{ text || '-' }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="账号额度" :width="120">
+                  <template #default="{ record }">{{ smallcatQuotaText(record) }}</template>
                 </Table.Column>
                 <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
                   <template #default="{ text }">{{ timestamp(text) }}</template>

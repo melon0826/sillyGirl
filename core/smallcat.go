@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +32,11 @@ type SmallcatPanel struct {
 	LastCheckedAt int    `json:"last_checked_at"`
 	Status        string `json:"status"`
 	Message       string `json:"message"`
+	Group         string `json:"group"`
+	Namespace     string `json:"namespace"`
+	AccountLimit  string `json:"account_limit"`
+	AccountUsed   string `json:"account_used"`
+	CreditBalance string `json:"credit_balance"`
 }
 
 type smallcatAuthValidateResponse struct {
@@ -49,6 +56,7 @@ type PublicSmallcatPanel struct {
 func init() {
 	GinApi(GET, "/api/admin/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getSmallcatPanels()
+		refreshSmallcatPanelsStatus(panels)
 		ApiList(ctx, panels, len(panels))
 	})
 
@@ -206,36 +214,189 @@ func normalizeSmallcatAddress(address string) string {
 }
 
 func testSmallcatPanel(panel SmallcatPanel) (*SmallcatPanel, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, panel.Address+"/api/auth/validate", nil)
+	raw, err := requestSmallcatJSONWithTimeout(&panel, http.MethodGet, "/api/auth/validate", nil, nil, 8*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("auth", panel.APIAuth)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("smallcat 接口连接失败：%v", err)
-	}
-	defer resp.Body.Close()
-	authResp := smallcatAuthValidateResponse{}
-	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-		return nil, fmt.Errorf("smallcat 接口返回无法解析：%v", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("smallcat 接口 HTTP %d：%s", resp.StatusCode, authResp.Message)
-	}
-	if !authResp.Status {
-		if authResp.Message == "" {
-			authResp.Message = "验证失败，请检查 API AUTH"
-		}
-		return nil, errors.New(authResp.Message)
+	if err := smallcatEnvelopeError(raw, "验证失败，请检查 API AUTH"); err != nil {
+		return nil, err
 	}
 	panel.Address = normalizeSmallcatAddress(panel.Address)
 	panel.Status = "online"
 	panel.Message = "验证通过"
 	panel.LastCheckedAt = int(time.Now().Unix())
+	applySmallcatAuthStatus(&panel, raw)
+	_ = refreshSmallcatCreditBalance(&panel)
 	return &panel, nil
+}
+
+func refreshSmallcatPanelsStatus(panels []SmallcatPanel) {
+	var wg sync.WaitGroup
+	for index := range panels {
+		wg.Add(1)
+		go func(panel *SmallcatPanel) {
+			defer wg.Done()
+			refreshSmallcatPanelStatus(panel)
+		}(&panels[index])
+	}
+	wg.Wait()
+}
+
+func refreshSmallcatPanelStatus(panel *SmallcatPanel) {
+	if panel == nil || panel.Address == "" || panel.APIAuth == "" {
+		return
+	}
+	panel.Address = normalizeSmallcatAddress(panel.Address)
+	panel.LastCheckedAt = int(time.Now().Unix())
+	raw, err := requestSmallcatJSONWithTimeout(panel, http.MethodGet, "/api/auth/validate", nil, nil, 4*time.Second)
+	if err != nil {
+		panel.Status = "offline"
+		panel.Message = err.Error()
+		return
+	}
+	if err := smallcatEnvelopeError(raw, "验证失败，请检查 API AUTH"); err != nil {
+		panel.Status = "offline"
+		panel.Message = err.Error()
+		return
+	}
+	panel.Status = "online"
+	panel.Message = "验证通过"
+	applySmallcatAuthStatus(panel, raw)
+	if err := refreshSmallcatCreditBalance(panel); err != nil && panel.Message == "验证通过" {
+		panel.Message = "积分读取失败：" + err.Error()
+	}
+}
+
+func refreshSmallcatCreditBalance(panel *SmallcatPanel) error {
+	raw, err := requestSmallcatJSONWithTimeout(panel, http.MethodGet, "/credits/balance", nil, nil, 4*time.Second)
+	if err != nil {
+		return err
+	}
+	if err := smallcatEnvelopeError(raw, "积分读取失败"); err != nil {
+		return err
+	}
+	value := decodeSmallcatJSONValue(raw)
+	panel.CreditBalance = smallcatStringValue(firstSmallcatValue(value, "balance", "credits", "credit", "points"))
+	return nil
+}
+
+func smallcatEnvelopeError(raw json.RawMessage, fallback string) error {
+	envelope := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
+	}
+	statusRaw, ok := envelope["status"]
+	if !ok {
+		return nil
+	}
+	status := false
+	if err := json.Unmarshal(statusRaw, &status); err != nil || status {
+		return nil
+	}
+	authResp := smallcatAuthValidateResponse{}
+	_ = json.Unmarshal(raw, &authResp)
+	if authResp.Message == "" {
+		authResp.Message = fallback
+	}
+	return errors.New(authResp.Message)
+}
+
+func applySmallcatAuthStatus(panel *SmallcatPanel, raw json.RawMessage) {
+	value := decodeSmallcatJSONValue(raw)
+	panel.Group = smallcatGroupLabel(firstNonEmpty(
+		smallcatStringValue(firstSmallcatValue(value, "group")),
+		smallcatStringValue(firstSmallcatValue(value, "user_group")),
+	))
+	panel.Namespace = smallcatStringValue(firstSmallcatValue(value, "namespace"))
+	panel.AccountLimit = smallcatStringValue(firstSmallcatValue(value, "limit", "account_limit", "max_accounts"))
+	panel.AccountUsed = smallcatStringValue(firstSmallcatValue(value, "used", "account_used", "current_accounts", "accounts_count"))
+	if quota := firstSmallcatValue(value, "quota"); quota != nil {
+		panel.AccountLimit = firstNonEmpty(panel.AccountLimit, smallcatStringValue(firstSmallcatValue(quota, "limit", "max", "total")))
+		panel.AccountUsed = firstNonEmpty(panel.AccountUsed, smallcatStringValue(firstSmallcatValue(quota, "used", "current", "count")))
+	}
+}
+
+func decodeSmallcatJSONValue(raw json.RawMessage) any {
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil
+	}
+	return value
+}
+
+func firstSmallcatValue(value any, keys ...string) any {
+	wanted := map[string]struct{}{}
+	for _, key := range keys {
+		wanted[strings.ToLower(key)] = struct{}{}
+	}
+	return walkSmallcatValue(value, wanted)
+}
+
+func walkSmallcatValue(value any, keys map[string]struct{}) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if _, ok := keys[strings.ToLower(key)]; ok && item != nil && item != "" {
+				return item
+			}
+		}
+		for _, item := range typed {
+			if found := walkSmallcatValue(item, keys); found != nil && found != "" {
+				return found
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if found := walkSmallcatValue(item, keys); found != nil && found != "" {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+func smallcatStringValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return typed.String()
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case bool:
+		return strconv.FormatBool(typed)
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
+}
+
+func smallcatGroupLabel(group string) string {
+	switch strings.ToLower(strings.TrimSpace(group)) {
+	case "":
+		return ""
+	case "normal":
+		return "普通用户组"
+	case "pro":
+		return "PRO"
+	case "vip":
+		return "VIP"
+	default:
+		return group
+	}
 }
 
 func publicSmallcatPanels() []PublicSmallcatPanel {
@@ -272,6 +433,10 @@ func smallcatPanelByIndex(index int) (*SmallcatPanel, error) {
 }
 
 func requestSmallcatJSON(panel *SmallcatPanel, method string, path string, body interface{}, query map[string]string) (json.RawMessage, error) {
+	return requestSmallcatJSONWithTimeout(panel, method, path, body, query, 15*time.Second)
+}
+
+func requestSmallcatJSONWithTimeout(panel *SmallcatPanel, method string, path string, body interface{}, query map[string]string, timeout time.Duration) (json.RawMessage, error) {
 	if panel == nil {
 		return nil, errors.New("smallcat 配置不存在")
 	}
@@ -292,7 +457,7 @@ func requestSmallcatJSON(panel *SmallcatPanel, method string, path string, body 
 		}
 		reader = bytes.NewReader(data)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
 	if err != nil {

@@ -169,6 +169,10 @@ func init() {
 			ApiFail(ctx, "请求体不是有效 JSON")
 			return
 		}
+		if !isPublicUserBindingPlatform(payload.Platform) {
+			ApiFail(ctx, "普通用户只能绑定 QQ 或 Telegram；smallcat 请通过扫码登录")
+			return
+		}
 		bindings, err := updateNormalUserBinding(user.Username, payload.Platform, payload.Value)
 		if err != nil {
 			ApiFail(ctx, err.Error())
@@ -188,6 +192,10 @@ func init() {
 		}{}
 		if err := json.NewDecoder(ctx.Request.Body).Decode(&payload); err != nil {
 			ApiFail(ctx, "请求体不是有效 JSON")
+			return
+		}
+		if !isPublicUserBindingPlatform(payload.Platform) {
+			ApiFail(ctx, "普通用户只能解绑 QQ 或 Telegram")
 			return
 		}
 		bindings, err := updateNormalUserBinding(user.Username, payload.Platform, "")
@@ -333,6 +341,11 @@ func init() {
 	})
 
 	GinApi(POST, "/api/user/smallcat/account/add", RequireUserAuth, func(ctx *gin.Context) {
+		user := currentNormalUser(ctx)
+		if user == nil {
+			ApiError(ctx, http.StatusUnauthorized, "请先登录")
+			return
+		}
 		payload := struct {
 			Panel       int    `json:"panel"`
 			Code        string `json:"code"`
@@ -368,10 +381,29 @@ func init() {
 			ApiFail(ctx, message)
 			return
 		}
-		ApiOK(ctx, data)
+		openid := findStringInJSON(data, "openid", "openId", "open_id")
+		if openid == "" {
+			ApiFail(ctx, "smallcat 添加账号成功，但接口未返回 openid")
+			return
+		}
+		bindings, err := updateNormalUserBinding(user.Username, "smallcat", openid)
+		if err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		ApiOK(ctx, gin.H{
+			"openid":   openid,
+			"bindings": bindings,
+			"raw":      data,
+		})
 	})
 
 	GinApi(POST, "/api/user/smallcat/code", RequireUserAuth, func(ctx *gin.Context) {
+		user := currentNormalUser(ctx)
+		if user == nil {
+			ApiError(ctx, http.StatusUnauthorized, "请先登录")
+			return
+		}
 		payload := struct {
 			Panel  int    `json:"panel"`
 			OpenID string `json:"openid"`
@@ -385,6 +417,10 @@ func init() {
 		payload.AppID = strings.TrimSpace(payload.AppID)
 		if payload.OpenID == "" || payload.AppID == "" {
 			ApiFail(ctx, "openid 和 appid 不能为空")
+			return
+		}
+		if !normalUserHasSmallcatOpenID(user.Username, payload.OpenID) {
+			ApiFail(ctx, "只能为当前用户已绑定的 smallcat openid 生成 code")
 			return
 		}
 		panel, err := smallcatPanelByIndex(payload.Panel)
@@ -672,6 +708,15 @@ func updateNormalUserBinding(username string, platform string, value string) (no
 	return bindings, nil
 }
 
+func isPublicUserBindingPlatform(platform string) bool {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "qq", "telegram", "tg", "tgid":
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeNormalUserBindings(bindings normalUserBindings) normalUserBindings {
 	bindings.QQ = strings.TrimSpace(bindings.QQ)
 	bindings.Telegram = strings.TrimSpace(bindings.Telegram)
@@ -689,6 +734,20 @@ func normalizeNormalUserBindings(bindings normalUserBindings) normalUserBindings
 		bindings.SmallcatOpenID = ""
 	}
 	return bindings
+}
+
+func normalUserHasSmallcatOpenID(username string, openid string) bool {
+	openid = strings.TrimSpace(openid)
+	if openid == "" {
+		return false
+	}
+	bindings := loadNormalUserBindings(username)
+	for _, item := range bindings.SmallcatOpenIDs {
+		if item == openid {
+			return true
+		}
+	}
+	return bindings.SmallcatOpenID == openid
 }
 
 func appendUniqueOpenID(values []string, value string) []string {

@@ -155,6 +155,11 @@ export type SmallcatPanel = {
   last_checked_at?: number;
   status?: string;
   message?: string;
+  group?: string;
+  namespace?: string;
+  account_limit?: string;
+  account_used?: string;
+  credit_balance?: string;
 };
 
 export type DaidaiPanel = {
