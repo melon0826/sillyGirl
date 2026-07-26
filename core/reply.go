@@ -44,7 +44,7 @@ func init() {
 		})
 		return nil
 	})
-	GinApi(GET, "/api/reply/list", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/reply/list", RequireAuth, func(ctx *gin.Context) {
 		repliesLock.RLock()
 		defer repliesLock.RUnlock()
 		page, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
@@ -102,7 +102,7 @@ func init() {
 		})
 	})
 
-	GinApi(POST, "/api/reply", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/reply", RequireAuth, func(ctx *gin.Context) {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
 		var reply Reply
@@ -169,7 +169,7 @@ func init() {
 		ApiOK(ctx, nil)
 	})
 	//删除功能
-	GinApi(DELETE, "/api/reply", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/reply", RequireAuth, func(ctx *gin.Context) {
 		repliesLock.Lock()
 		defer repliesLock.Unlock()
 		id := utils.Int(ctx.Query("id"))

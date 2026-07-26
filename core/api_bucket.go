@@ -61,7 +61,7 @@ func checkFilePlugin(key string, value *string) {
 
 func init() {
 	var sillyGirl = MakeBucket("sillyGirl")
-	GinApi(GET, "/api/storage/list", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/storage/list", RequireAuth, func(ctx *gin.Context) {
 		page, _ := strconv.Atoi(ctx.DefaultQuery("current", "1"))
 		perPage, _ := strconv.Atoi(ctx.DefaultQuery("pageSize", "20"))
 		keys := ctx.Query("keys")
@@ -112,7 +112,7 @@ func init() {
 		}
 		ApiList(ctx, res, len(data), map[string]interface{}{"page": page})
 	})
-	GinApi(GET, "/api/storage", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/storage", RequireAuth, func(ctx *gin.Context) {
 		keys := ctx.Query("keys")
 		if keys == "" {
 			buckets := sillyGirl.Buckets()
@@ -195,7 +195,7 @@ func init() {
 		}
 		ApiOK(ctx, data)
 	})
-	GinApi(PUT, "/api/storage", RequireAuth, func(ctx *gin.Context) {
+	GinApi(PUT, "/api/admin/storage", RequireAuth, func(ctx *gin.Context) {
 		uuid := ctx.Query("uuid")
 		if uuid != "" {
 			for _, f := range Functions {
@@ -268,7 +268,7 @@ func init() {
 			"changes":  changes,
 		})
 	})
-	GinApi(POST, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/storage/bucket", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
@@ -291,7 +291,7 @@ func init() {
 		}
 		ApiOK(ctx, nil)
 	})
-	GinApi(DELETE, "/api/storage/bucket", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/storage/bucket", RequireAuth, func(ctx *gin.Context) {
 		req := storageBucketRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())

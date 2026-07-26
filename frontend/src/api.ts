@@ -84,7 +84,7 @@ export function del<T>(url: string, data?: unknown) {
 export async function saveStorage(updates: Record<string, unknown>, uuid?: string) {
   const query = uuid ? `?uuid=${encodeURIComponent(uuid)}` : '';
   const res = await put<{ data?: { messages?: Record<string, string>; errors?: Record<string, string>; changes?: Record<string, boolean> }; messages?: Record<string, string>; errors?: Record<string, string> }>(
-    `/api/storage${query}`,
+    `/api/admin/storage${query}`,
     updates,
   );
   const payload = res.data || res;
@@ -101,5 +101,5 @@ export async function saveStorage(updates: Record<string, unknown>, uuid?: strin
 }
 
 export function readStorage<T = Record<string, unknown>>(keys: string) {
-  return get<{ status: boolean; message: string; data: T }>(`/api/storage?keys=${encodeURIComponent(keys)}`);
+  return get<{ status: boolean; message: string; data: T }>(`/api/admin/storage?keys=${encodeURIComponent(keys)}`);
 }

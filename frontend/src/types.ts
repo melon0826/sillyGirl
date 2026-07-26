@@ -15,6 +15,7 @@ export type CurrentUser = {
   plugins?: Array<{ path: string; name: string; create_at?: string; type?: string; file?: string; plugin?: string }>;
   adapters?: AdapterStatus[];
   integrations?: Record<string, IntegrationStatus>;
+  user_stats?: UserStats;
   version?: VersionInfo;
 };
 
@@ -38,6 +39,29 @@ export type VersionInfo = {
   remote?: string;
   source?: string;
   repository?: string;
+};
+
+export type UserStats = {
+  total?: number;
+  today?: number;
+  error?: string;
+};
+
+export type AdminUserRow = {
+  id: string;
+  username: string;
+  nickname: string;
+  created_at?: number;
+  updated_at?: number;
+  disabled?: boolean;
+  storage_key?: string;
+  bindings?: {
+    qq?: string;
+    telegram?: string;
+    smallcat_openid?: string;
+    smallcat_openids?: string[];
+    updated_at?: number;
+  };
 };
 
 export type PluginInfo = {

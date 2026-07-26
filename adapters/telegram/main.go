@@ -20,8 +20,6 @@ import (
 )
 
 var telegram = core.MakeBucket("telegram")
-var tg = core.MakeBucket("tg")
-
 var runtime = struct {
 	sync.Mutex
 	cancel context.CancelFunc
@@ -79,15 +77,11 @@ func init() {
 		go restart()
 		return nil
 	})
-	storage.Watch(telegram, "bot_token", func(old, new, key string) *storage.Final {
-		go restart()
-		return nil
-	})
 	storage.Watch(telegram, "enable", func(old, new, key string) *storage.Final {
 		go restart()
 		return nil
 	})
-	storage.Watch(tg, "token", func(old, new, key string) *storage.Final {
+	storage.Watch(telegram, "api_base", func(old, new, key string) *storage.Final {
 		go restart()
 		return nil
 	})
@@ -124,11 +118,11 @@ func restart() {
 func run(ctx context.Context, token string) {
 	b := &bot{
 		token:   token,
-		baseURL: strings.TrimRight(firstNonEmpty(telegram.GetString("api_base"), tg.GetString("api_base"), "https://api.telegram.org"), "/"),
+		baseURL: strings.TrimRight(firstNonEmpty(telegram.GetString("api_base"), "https://api.telegram.org"), "/"),
 		client: &http.Client{
 			Timeout: 45 * time.Second,
 		},
-		debug: telegram.GetBool("debug", false) || tg.GetBool("debug", false),
+		debug: telegram.GetBool("debug", false),
 	}
 	if err := b.start(ctx); err != nil && ctx.Err() == nil {
 		core.Logs.Warn("telegram机器人启动失败：%v", err)
@@ -271,12 +265,8 @@ func (b *bot) getUpdates(ctx context.Context, offset int64) ([]update, error) {
 }
 
 func (b *bot) deleteWebhook(ctx context.Context) error {
-	params := map[string]interface{}{}
-	if telegram.GetBool("drop_pending_updates", true) {
-		params["drop_pending_updates"] = true
-	}
 	var resp apiResponse[bool]
-	return b.post(ctx, "deleteWebhook", params, &resp)
+	return b.post(ctx, "deleteWebhook", map[string]interface{}{}, &resp)
 }
 
 func (b *bot) get(ctx context.Context, method string, params map[string]string, out interface{}) error {
@@ -344,18 +334,11 @@ func (b *bot) apiURL(method string) string {
 }
 
 func getToken() string {
-	return firstNonEmpty(
-		telegram.GetString("token"),
-		telegram.GetString("bot_token"),
-		tg.GetString("token"),
-	)
+	return strings.TrimSpace(telegram.GetString("token"))
 }
 
 func enabled() bool {
 	value := strings.TrimSpace(strings.ToLower(telegram.GetString("enable")))
-	if value == "" {
-		value = strings.TrimSpace(strings.ToLower(tg.GetString("enable")))
-	}
 	return value != "false" && value != "0" && value != "no" && value != "off"
 }
 

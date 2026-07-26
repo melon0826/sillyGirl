@@ -389,17 +389,15 @@ SillyGirl 侧配置：
 | 存储桶 | 键 | 说明 |
 |------|----|------|
 | `telegram` | `token` | BotFather 提供的 Bot Token |
-| `telegram` | `bot_token` | 兼容写法；未设置 `token` 时读取 |
 | `telegram` | `enable` | 可选，设为 `false` 时禁用 |
 | `telegram` | `api_base` | 可选，默认 `https://api.telegram.org` |
-| `telegram` | `drop_pending_updates` | 可选，默认 `true` |
 | `telegram` | `debug` | 可选，设为 `true` 时输出 Telegram 调试日志 |
 
 接入步骤：
 
 1. 在 Telegram 找 `@BotFather` 创建 Bot，拿到 Bot Token。
-2. 在 Admin 面板「存储」选择 `telegram` 存储桶，新增 `token`。
-3. 如果服务器访问 Telegram 官方 API 不通，可以把 `api_base` 设置为反代地址，例如 `https://api.telegram.org` 的兼容代理。
+2. 在 Admin 面板「基础设置」填写 Telegram Bot 的 `Token`。
+3. 如果服务器访问 Telegram 官方 API 不通，在「基础设置」把「代理 API」设置为 `https://api.telegram.org` 的兼容反代地址。
 4. 保存后适配器会自动重启；日志出现 `telegram机器人(...)轮询已启动` 即表示接入成功。
 
 Telegram 当前使用 Bot API 长轮询模式，启动时会调用 `deleteWebhook`。如果这个 Bot 之前设置过 webhook，程序会自动清理后再开始轮询。

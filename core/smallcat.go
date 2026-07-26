@@ -1,16 +1,18 @@
 package core
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/goccy/go-json"
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
@@ -36,13 +38,21 @@ type smallcatAuthValidateResponse struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+type PublicSmallcatPanel struct {
+	Index   int    `json:"index"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
 func init() {
-	GinApi(GET, "/api/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/smallcat/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getSmallcatPanels()
 		ApiList(ctx, panels, len(panels))
 	})
 
-	GinApi(POST, "/api/smallcat/panel/test", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/smallcat/panel/test", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -60,7 +70,7 @@ func init() {
 		ApiOK(ctx, result)
 	})
 
-	GinApi(POST, "/api/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -114,7 +124,7 @@ func init() {
 		ApiOK(ctx, panel)
 	})
 
-	GinApi(DELETE, "/api/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/smallcat/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := SmallcatPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -226,4 +236,94 @@ func testSmallcatPanel(panel SmallcatPanel) (*SmallcatPanel, error) {
 	panel.Message = "验证通过"
 	panel.LastCheckedAt = int(time.Now().Unix())
 	return &panel, nil
+}
+
+func publicSmallcatPanels() []PublicSmallcatPanel {
+	panels := getSmallcatPanels()
+	result := make([]PublicSmallcatPanel, 0, len(panels))
+	for index, panel := range panels {
+		result = append(result, PublicSmallcatPanel{
+			Index:   index + 1,
+			ID:      panel.ID,
+			Name:    firstNonEmpty(panel.Name, fmt.Sprintf("smallcat #%d", index+1)),
+			Status:  panel.Status,
+			Message: panel.Message,
+		})
+	}
+	return result
+}
+
+func smallcatPanelByIndex(index int) (*SmallcatPanel, error) {
+	panels := getSmallcatPanels()
+	if len(panels) == 0 {
+		return nil, errors.New("后台未绑定 smallcat")
+	}
+	if index <= 0 {
+		index = 1
+	}
+	if index > len(panels) {
+		return nil, fmt.Errorf("smallcat 编号 %d 不存在", index)
+	}
+	panel := panels[index-1]
+	if panel.Address == "" || panel.APIAuth == "" {
+		return nil, errors.New("smallcat 配置不完整")
+	}
+	return &panel, nil
+}
+
+func requestSmallcatJSON(panel *SmallcatPanel, method string, path string, body interface{}, query map[string]string) (json.RawMessage, error) {
+	if panel == nil {
+		return nil, errors.New("smallcat 配置不存在")
+	}
+	address := normalizeSmallcatAddress(panel.Address)
+	values := url.Values{}
+	for key, value := range query {
+		values.Set(key, value)
+	}
+	requestURL := address + path
+	if encoded := values.Encode(); encoded != "" {
+		requestURL += "?" + encoded
+	}
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(data)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, reader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("auth", panel.APIAuth)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("smallcat 请求失败：%v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message := strings.TrimSpace(string(raw))
+		if len(message) > 200 {
+			message = message[:200]
+		}
+		return nil, fmt.Errorf("smallcat HTTP %d：%s", resp.StatusCode, message)
+	}
+	if !json.Valid(raw) {
+		message := strings.TrimSpace(string(raw))
+		if len(message) > 200 {
+			message = message[:200]
+		}
+		return nil, fmt.Errorf("smallcat 返回非 JSON：%s", message)
+	}
+	return json.RawMessage(raw), nil
 }

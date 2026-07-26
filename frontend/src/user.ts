@@ -1,6 +1,6 @@
 import { createApp } from 'vue';
 import 'ant-design-vue/dist/reset.css';
-import App from './App.vue';
+import UserCenter from './User.vue';
 import './styles.css';
 
-createApp(App).mount('#root');
+createApp(UserCenter).mount('#user-root');

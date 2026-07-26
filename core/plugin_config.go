@@ -23,10 +23,10 @@ type PluginConfigRecord struct {
 }
 
 func init() {
-	GinApi(GET, "/api/plugin/configs", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugin/configs", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, getPluginConfigRecords())
 	})
-	GinApi(GET, "/api/plugin/config", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
 		uuid := ctx.Query("uuid")
 		record := getPluginConfigRecord(uuid)
 		if record == nil {
@@ -35,7 +35,7 @@ func init() {
 		}
 		ApiOK(ctx, record)
 	})
-	GinApi(PUT, "/api/plugin/config", RequireAuth, func(ctx *gin.Context) {
+	GinApi(PUT, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
 		var req struct {
 			UUID  string                 `json:"uuid"`
 			Value map[string]interface{} `json:"value"`

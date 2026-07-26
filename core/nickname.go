@@ -33,7 +33,7 @@ func CreateNickName(nick *Nickname) {
 }
 
 func init() {
-	GinApi(GET, "/api/nickname/labels", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/nickname/labels", RequireAuth, func(ctx *gin.Context) {
 		group := true
 		keyword := ctx.Query("gkeyword")
 		if keyword == "" {

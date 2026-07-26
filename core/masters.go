@@ -16,7 +16,7 @@ type Master struct {
 }
 
 func init() {
-	GinApi(GET, "/api/master/list", RequireAuth, func(c *gin.Context) {
+	GinApi(GET, "/api/admin/master/list", RequireAuth, func(c *gin.Context) {
 		plts := getPltsArray()
 		ms := []Master{}
 		i := 1
@@ -44,7 +44,7 @@ func init() {
 			"platforms": getPltsLabel(),
 		})
 	})
-	GinApi(POST, "/api/master", RequireAuth, func(c *gin.Context) {
+	GinApi(POST, "/api/admin/master", RequireAuth, func(c *gin.Context) {
 		m := Master{}
 		c.BindJSON(&m)
 		if m.ID == "" {
@@ -68,7 +68,7 @@ func init() {
 
 		ApiOK(c, nil)
 	})
-	GinApi(DELETE, "/api/master", RequireAuth, func(c *gin.Context) {
+	GinApi(DELETE, "/api/admin/master", RequireAuth, func(c *gin.Context) {
 		m := Master{}
 		c.BindJSON(&m)
 		if m.ID == "" {

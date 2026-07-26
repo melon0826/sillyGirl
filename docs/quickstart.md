@@ -159,6 +159,8 @@ app.set("port", 9090);  // 修改 HTTP 端口
 | `telegram` | `enable` | Telegram Bot 开关 | `true` |
 | `telegram` | `api_base` | Telegram Bot API 地址 | `https://api.telegram.org` |
 
+Telegram Bot 的 `token` 和 `api_base` 可以直接在 Admin 面板「基础设置」中填写；保存后适配器会自动重启。
+
 ### 存储后端切换
 
 **BoltDB（默认）**：

@@ -230,7 +230,7 @@ func init() {
 		pts = tmp
 		return nil
 	})
-	GinApi(GET, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
 		current := utils.Int(ctx.Query("current"))
 		pageSize := utils.Int(ctx.Query("pageSize"))
 		rr := TasksResult{}
@@ -275,7 +275,7 @@ func init() {
 		}
 		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
-	GinApi(POST, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
@@ -365,7 +365,7 @@ func init() {
 		}
 		ApiOK(ctx, nil)
 	})
-	GinApi(DELETE, "/api/tasks", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/tasks", RequireAuth, func(ctx *gin.Context) {
 		pt := &Tasks{}
 		err := ctx.BindJSON(pt)
 		if err != nil {
@@ -388,7 +388,7 @@ func init() {
 		tasks.Set(pt.ID, "")
 		ApiOK(ctx, nil)
 	})
-	GinApi(GET, "/api/task/selects", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/task/selects", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}
 		var task_id = ctx.Query("task_id")
 		var pts = pts
@@ -457,7 +457,7 @@ func init() {
 			"group_names": group_names,
 		})
 	})
-	GinApi(GET, "/api/tasks/run", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/tasks/run", RequireAuth, func(ctx *gin.Context) {
 		var task_id = ctx.Query("task_id")
 		for _, pt := range pts {
 			if pt.ID == task_id {

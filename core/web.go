@@ -22,7 +22,7 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
-//go:embed admin/*
+//go:embed all:admin
 var static embed.FS
 
 var Handle = make(map[string]func(c *gin.Context))
@@ -220,24 +220,22 @@ func initWeb() {
 		// 	logs.Debug(c.Request.URL.Path)
 		// }
 		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/" {
-			c.Redirect(http.StatusFound, "/admin")
+			serveHome(c)
+			return
+		}
+		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/user" {
+			serveUser(c)
 			return
 		}
 		c.Status(200)
-		if strings.HasPrefix(c.Request.URL.Path, "/admin") {
-			if file, err := static.Open(strings.Trim(c.Request.URL.Path, "/")); err == nil {
-				fs, _ := file.Stat()
-				if !fs.IsDir() {
-					defer file.Close()
-					c.Header("cache-control", "max-age=864000")
-					if contentType := mime.TypeByExtension(filepath.Ext(c.Request.URL.Path)); contentType != "" {
-						c.Header("Content-Type", contentType)
-					}
-					io.Copy(c.Writer, file)
-					return
-				} else {
-					file.Close()
-				}
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			if serveEmbeddedFile(c, "admin"+c.Request.URL.Path) {
+				return
+			}
+		}
+		if c.Request.Method == http.MethodGet && strings.HasPrefix(c.Request.URL.Path, "/admin") {
+			if serveEmbeddedFile(c, strings.Trim(c.Request.URL.Path, "/")) {
+				return
 			}
 			data, err := static.ReadFile("admin/index.html")
 			if err == nil {
@@ -326,6 +324,49 @@ func initWeb() {
 			logs.Error("Http服务运行失败：%s", err.Error())
 		}
 	}()
+}
+
+func serveHome(c *gin.Context) {
+	data, err := static.ReadFile("admin/home.html")
+	if err != nil {
+		c.String(http.StatusInternalServerError, "首页资源不存在")
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+	c.Writer.Write(data)
+}
+
+func serveUser(c *gin.Context) {
+	data, err := static.ReadFile("admin/user.html")
+	if err != nil {
+		c.String(http.StatusInternalServerError, "用户中心资源不存在")
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+	c.Writer.Write(data)
+}
+
+func serveEmbeddedFile(c *gin.Context, name string) bool {
+	file, err := static.Open(strings.Trim(name, "/"))
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	fs, _ := file.Stat()
+	if fs.IsDir() {
+		return false
+	}
+	c.Header("cache-control", "max-age=864000")
+	if contentType := mime.TypeByExtension(filepath.Ext(name)); contentType != "" {
+		c.Header("Content-Type", contentType)
+	}
+	c.Status(http.StatusOK)
+	io.Copy(c.Writer, file)
+	return true
 }
 
 type Req struct {

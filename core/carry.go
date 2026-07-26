@@ -217,7 +217,7 @@ type CarryGroup struct {
 
 // CARRY API
 func init() {
-	GinApi(GET, "/api/carry/groups", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/carry/groups", RequireAuth, func(ctx *gin.Context) {
 		current := utils.Int(ctx.Query("current"))
 		pageSize := utils.Int(ctx.Query("pageSize"))
 		rr := CarryGroupsResult{}
@@ -251,7 +251,7 @@ func init() {
 		}
 		ApiList(ctx, rr.Data, rr.Total, map[string]interface{}{"page": rr.Page, "time": rr.Time})
 	})
-	GinApi(GET, "/api/carry/group_names", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/carry/group_names", RequireAuth, func(ctx *gin.Context) {
 		cgs := cgs
 		var names = map[string]string{}
 		for _, cg := range cgs {
@@ -259,7 +259,7 @@ func init() {
 		}
 		ApiOK(ctx, names)
 	})
-	GinApi(GET, "/api/proxy/scripts", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/proxy/scripts", RequireAuth, func(ctx *gin.Context) {
 		var scripts = map[string]string{}
 		functions := Functions
 		for _, function := range functions {
@@ -277,7 +277,7 @@ func init() {
 		}
 		return true
 	}
-	GinApi(GET, "/api/proxy/rules", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/proxy/rules", RequireAuth, func(ctx *gin.Context) {
 		keyword := ctx.Query("keyword")
 		var scripts = map[string]string{}
 		scripts[keyword] = keyword
@@ -288,7 +288,7 @@ func init() {
 		}
 		ApiOK(ctx, scripts)
 	})
-	GinApi(GET, "/api/carry/group_selects", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/carry/group_selects", RequireAuth, func(ctx *gin.Context) {
 		chat_id := ctx.Query("chat_id")
 		platform := ctx.Query("platform")
 		cgs := cgs
@@ -314,7 +314,7 @@ func init() {
 			"scripts":   scripts,
 		})
 	})
-	GinApi(POST, "/api/carry/group", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/carry/group", RequireAuth, func(ctx *gin.Context) {
 		// 将请求的 JSON 数据解析为一个 map[string]interface{} 类型的变量
 		var updateData map[string]interface{}
 		err := ctx.BindJSON(&updateData)
@@ -378,7 +378,7 @@ func init() {
 		}
 		ApiOK(ctx, nil)
 	})
-	GinApi(DELETE, "/api/carry/group", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/carry/group", RequireAuth, func(ctx *gin.Context) {
 		cg := &CarryGroup{}
 		err := ctx.BindJSON(cg)
 		if err != nil {

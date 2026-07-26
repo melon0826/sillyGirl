@@ -42,12 +42,12 @@ type qinglongTokenResponse struct {
 }
 
 func init() {
-	GinApi(GET, "/api/qinglong/panels", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/qinglong/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getQinglongPanels()
 		ApiList(ctx, panels, len(panels))
 	})
 
-	GinApi(POST, "/api/qinglong/panel/test", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/qinglong/panel/test", RequireAuth, func(ctx *gin.Context) {
 		panel := QinglongPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -65,7 +65,7 @@ func init() {
 		ApiOK(ctx, result)
 	})
 
-	GinApi(POST, "/api/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := QinglongPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -119,7 +119,7 @@ func init() {
 		ApiOK(ctx, panel)
 	})
 
-	GinApi(DELETE, "/api/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/qinglong/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := QinglongPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())

@@ -72,7 +72,7 @@ var nodeSillygirlRuntimeDependencies = map[string]string{
 }
 
 func init() {
-	GinApi(GET, "/api/node/dependencies", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/node/dependencies", RequireAuth, func(ctx *gin.Context) {
 		pluginName := strings.TrimSpace(ctx.Query("plugin"))
 		plugins := listNodeDependencyPlugins()
 		pnpm, err := resolvePnpmCommand()
@@ -113,7 +113,7 @@ func init() {
 		ApiOK(ctx, data)
 	})
 
-	GinApi(PUT, "/api/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
+	GinApi(PUT, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
 		req := struct {
 			Registry string `json:"registry"`
 		}{}
@@ -130,11 +130,11 @@ func init() {
 		ApiOK(ctx, map[string]string{"registry": registry})
 	})
 
-	GinApi(GET, "/api/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/node/dependency/registry", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, map[string]string{"registry": pnpmRegistry()})
 	})
 
-	GinApi(POST, "/api/node/dependency", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/node/dependency", RequireAuth, func(ctx *gin.Context) {
 		req := nodeDependencyRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
@@ -152,7 +152,7 @@ func init() {
 		ApiOK(ctx, output)
 	})
 
-	GinApi(DELETE, "/api/node/dependency", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/node/dependency", RequireAuth, func(ctx *gin.Context) {
 		req := nodeDependencyRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
@@ -170,7 +170,7 @@ func init() {
 		ApiOK(ctx, output)
 	})
 
-	GinApi(GET, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
 		id := strings.TrimSpace(ctx.Query("id"))
 		f, err := nodeFunctionByID(id)
 		if err != nil {
@@ -191,7 +191,7 @@ func init() {
 		})
 	})
 
-	GinApi(POST, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		_ = ctx.BindJSON(&req)
 		fileName, err := normalizeNodeScriptFileName(req.Name)
@@ -219,7 +219,7 @@ func init() {
 		})
 	})
 
-	GinApi(PUT, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(PUT, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())
@@ -246,7 +246,7 @@ func init() {
 		ApiOK(ctx, nil)
 	})
 
-	GinApi(DELETE, "/api/node/script", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/node/script", RequireAuth, func(ctx *gin.Context) {
 		req := nodeScriptRequest{}
 		if err := ctx.BindJSON(&req); err != nil {
 			ApiFail(ctx, err.Error())

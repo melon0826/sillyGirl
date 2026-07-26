@@ -31,7 +31,7 @@ type Bucket struct {
 }
 
 var toMaster = func(bucket, key, value string) (string, bool, error) {
-	req := httplib.Put(master + "/api/storage")
+	req := httplib.Put(master + "/api/admin/storage")
 	web_token := sillyGirl.GetString("web_token")
 	if web_token == "" {
 		return "", false, errors.New("请先在本体可视化登录！")

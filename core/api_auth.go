@@ -99,12 +99,12 @@ func init() {
 		return nil
 	})
 	///可视化部分
-	GinApi(GET, "/api/setup/status", func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/setup/status", func(ctx *gin.Context) {
 		ApiOK(ctx, map[string]interface{}{
 			"initialized": strings.TrimSpace(password) != "",
 		})
 	})
-	GinApi(POST, "/api/setup/admin", func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/register", func(ctx *gin.Context) {
 		setupLock.Lock()
 		defer setupLock.Unlock()
 		if strings.TrimSpace(password) != "" {
@@ -144,7 +144,7 @@ func init() {
 			"expiresIn":        adminJWTExpireSeconds,
 		})
 	})
-	GinApi(POST, "/api/login/account", func(ctx *gin.Context) {
+	adminLoginHandler := func(ctx *gin.Context) {
 		var auth = struct {
 			Password string `json:"password"`
 			Username string `json:"username"`
@@ -183,8 +183,9 @@ func init() {
 			recordFailedLoginAttempt(ctx, auth.Username)
 			ApiFail(ctx, "账号或密码错误")
 		}
-	})
-	GinApi(POST, "/api/login/outLogin", DestroyAuth, func(ctx *gin.Context) {
+	}
+	GinApi(POST, "/api/admin/login", adminLoginHandler)
+	GinApi(POST, "/api/admin/outlogin", DestroyAuth, func(ctx *gin.Context) {
 		sillyGirl.Set("web_token", "")
 		ApiOK(ctx, nil)
 	})
@@ -193,7 +194,7 @@ func init() {
 		pluginNextUuid = utils.GenUUID()
 		sillyGirl.Set("pluginNextUuid", pluginNextUuid)
 	}
-	GinApi(GET, "/api/currentUser", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/currentUser", RequireAuth, func(ctx *gin.Context) {
 		rs := []Route{}
 		for _, f := range Functions {
 			if f.UUID == pluginNextUuid {
@@ -243,9 +244,33 @@ func init() {
 			"plugins":      rrs,
 			"adapters":     overviewAdapterStatuses(),
 			"integrations": overviewIntegrationStatuses(),
+			"user_stats":   overviewUserStats(),
 			"version":      overviewVersionInfo(),
 		})
 	})
+}
+
+func overviewUserStats() map[string]interface{} {
+	rows, err := listNormalUsers()
+	if err != nil {
+		return map[string]interface{}{
+			"total": 0,
+			"today": 0,
+			"error": err.Error(),
+		}
+	}
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	today := 0
+	for _, row := range rows {
+		if row.CreatedAt >= startOfDay {
+			today++
+		}
+	}
+	return map[string]interface{}{
+		"total": len(rows),
+		"today": today,
+	}
 }
 
 func overviewVersionInfo() map[string]interface{} {

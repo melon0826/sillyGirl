@@ -44,12 +44,12 @@ type daidaiTokenResponse struct {
 }
 
 func init() {
-	GinApi(GET, "/api/daidai/panels", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/daidai/panels", RequireAuth, func(ctx *gin.Context) {
 		panels := getDaidaiPanels()
 		ApiList(ctx, panels, len(panels))
 	})
 
-	GinApi(POST, "/api/daidai/panel/test", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/daidai/panel/test", RequireAuth, func(ctx *gin.Context) {
 		panel := DaidaiPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -67,7 +67,7 @@ func init() {
 		ApiOK(ctx, result)
 	})
 
-	GinApi(POST, "/api/daidai/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/daidai/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := DaidaiPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())
@@ -121,7 +121,7 @@ func init() {
 		ApiOK(ctx, panel)
 	})
 
-	GinApi(DELETE, "/api/daidai/panel", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/daidai/panel", RequireAuth, func(ctx *gin.Context) {
 		panel := DaidaiPanel{}
 		if err := ctx.BindJSON(&panel); err != nil {
 			ApiFail(ctx, err.Error())

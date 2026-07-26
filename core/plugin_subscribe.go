@@ -81,16 +81,16 @@ func initPluginList() {
 var plugin_downloads = MakeBucket("plugin_downloads")
 
 func initWebPluginList() {
-	GinApi(GET, "/api/plugins/sources", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugins/sources", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, pluginSourceAddresses())
 	})
-	GinApi(GET, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+	GinApi(GET, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		ApiOK(ctx, map[string]interface{}{
 			"proxy":   githubAcceleratorPrefix(),
 			"options": builtinGithubAccelerators,
 		})
 	})
-	GinApi(PUT, "/api/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
+	GinApi(PUT, "/api/admin/plugins/github-proxy", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
@@ -104,7 +104,7 @@ func initWebPluginList() {
 		sillyGirl.Set(pluginSourceGithubProxyKey, proxy)
 		ApiOK(ctx, map[string]interface{}{"proxy": proxy})
 	})
-	GinApi(POST, "/api/plugins/source", RequireAuth, func(ctx *gin.Context) {
+	GinApi(POST, "/api/admin/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())
@@ -128,7 +128,7 @@ func initWebPluginList() {
 		plugin_list = append(plugin_list[:0], listPluginSources()...)
 		ApiOK(ctx, map[string]interface{}{"address": address, "count": len(items)})
 	})
-	GinApi(DELETE, "/api/plugins/source", RequireAuth, func(ctx *gin.Context) {
+	GinApi(DELETE, "/api/admin/plugins/source", RequireAuth, func(ctx *gin.Context) {
 		payload := map[string]string{}
 		if err := ctx.BindJSON(&payload); err != nil {
 			ApiFail(ctx, err.Error())

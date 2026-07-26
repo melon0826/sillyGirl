@@ -5,29 +5,32 @@ import { EditorView } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { basicSetup } from 'codemirror';
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Card,
-  Form,
-  Input,
-  InputNumber,
-  Layout,
-  Menu,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Statistic,
-  Switch,
-  Table,
-  Tabs,
-  Tag,
-  Typography,
-  message,
-} from 'ant-design-vue';
+import Alert from 'ant-design-vue/es/alert';
+import AntApp from 'ant-design-vue/es/app';
+import Button from 'ant-design-vue/es/button';
+import Card from 'ant-design-vue/es/card';
+import Col from 'ant-design-vue/es/col';
+import ConfigProvider from 'ant-design-vue/es/config-provider';
+import Drawer from 'ant-design-vue/es/drawer';
+import Empty from 'ant-design-vue/es/empty';
+import Form from 'ant-design-vue/es/form';
+import Input from 'ant-design-vue/es/input';
+import InputNumber from 'ant-design-vue/es/input-number';
+import Layout from 'ant-design-vue/es/layout';
+import Menu from 'ant-design-vue/es/menu';
+import message from 'ant-design-vue/es/message';
+import Modal from 'ant-design-vue/es/modal';
+import Popconfirm from 'ant-design-vue/es/popconfirm';
+import Row from 'ant-design-vue/es/row';
+import Select from 'ant-design-vue/es/select';
+import Space from 'ant-design-vue/es/space';
+import Spin from 'ant-design-vue/es/spin';
+import Statistic from 'ant-design-vue/es/statistic';
+import Switch from 'ant-design-vue/es/switch';
+import Table from 'ant-design-vue/es/table';
+import Tabs from 'ant-design-vue/es/tabs';
+import Tag from 'ant-design-vue/es/tag';
+import Typography from 'ant-design-vue/es/typography';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import {
   Bot,
@@ -58,7 +61,7 @@ import {
   Wand2,
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
-import type { CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
+import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { timestamp } from './utils';
 
 type ApiEnvelope<T> = {
@@ -80,6 +83,7 @@ type PageKey =
   | 'dependencies'
   | 'plugins'
   | 'storage'
+  | 'users'
   | 'reply'
   | 'tasks'
   | 'carry'
@@ -159,12 +163,16 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.1.0',
-    remote: info.remote || info.local || '0.1.0',
+    local: info.local || '0.1.1',
+    remote: info.remote || info.local || '0.1.1',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
 });
+const overviewUserStats = computed(() => ({
+  total: user.value?.user_stats?.total || 0,
+  today: user.value?.user_stats?.today || 0,
+}));
 
 const menuItems = [
   { key: 'welcome', label: '概览', icon: () => h(Home, { size: 16 }) },
@@ -173,6 +181,7 @@ const menuItems = [
   { key: 'plugins', label: '插件市场', icon: () => h(Plug, { size: 16 }) },
   { key: 'plugin-configs', label: '插件配置', icon: () => h(Boxes, { size: 16 }) },
   { key: 'storage', label: '存储', icon: () => h(Database, { size: 16 }) },
+  { key: 'users', label: '用户管理', icon: () => h(User, { size: 16 }) },
   { key: 'reply', label: '回复', icon: () => h(MessageSquare, { size: 16 }) },
   { key: 'tasks', label: '定时任务', icon: () => h(ClipboardList, { size: 16 }) },
   { key: 'carry', label: '搬运', icon: () => h(Radio, { size: 16 }) },
@@ -210,7 +219,7 @@ function navigate(next: PageKey, path?: string) {
 }
 
 async function loadSetupStatus() {
-  const res = await get<ApiEnvelope<{ initialized: boolean }>>('/api/setup/status');
+  const res = await get<ApiEnvelope<{ initialized: boolean }>>('/api/admin/setup/status');
   const data = apiData(res);
   setupRequired.value = !data?.initialized;
   return !!data?.initialized;
@@ -219,7 +228,7 @@ async function loadSetupStatus() {
 async function loadUser(setBooting = true) {
   if (setBooting) booting.value = true;
   try {
-    const res = await get<ApiEnvelope<CurrentUser>>('/api/currentUser');
+    const res = await get<ApiEnvelope<CurrentUser>>('/api/admin/currentUser');
     user.value = apiData(res) || {};
     setupRequired.value = false;
   } catch (error) {
@@ -236,7 +245,7 @@ async function loadUser(setBooting = true) {
 
 async function login() {
   try {
-    const res = await post<ApiEnvelope<AuthResponse>>('/api/login/account', loginModel);
+    const res = await post<ApiEnvelope<AuthResponse>>('/api/admin/login', loginModel);
     const auth = apiData(res);
     if (auth.status === 'setup_required') {
       setupRequired.value = true;
@@ -269,7 +278,7 @@ async function setupAdmin() {
     return;
   }
   try {
-    const res = await post<ApiEnvelope<AuthResponse>>('/api/setup/admin', { username: setupModel.username.trim(), password: setupModel.password });
+    const res = await post<ApiEnvelope<AuthResponse>>('/api/admin/register', { username: setupModel.username.trim(), password: setupModel.password });
     const auth = apiData(res);
     if (auth.status !== 'ok' || !auth.token) {
       message.error('账号创建失败');
@@ -289,7 +298,7 @@ async function setupAdmin() {
 }
 
 async function logout() {
-  await post('/api/login/outLogin').catch(() => undefined);
+  await post('/api/admin/outlogin').catch(() => undefined);
   clearAuthToken();
   user.value = null;
 }
@@ -416,7 +425,7 @@ async function loadScript(id = currentScriptId.value) {
   scriptState.loading = true;
   try {
     if (isNodeScript()) {
-      const res = await get<ApiEnvelope<{ content: string }>>(`/api/node/script?id=${encodeURIComponent(id)}`);
+      const res = await get<ApiEnvelope<{ content: string }>>(`/api/admin/node/script?id=${encodeURIComponent(id)}`);
       scriptState.content = apiData(res)?.content || '';
     } else {
       const res = await readStorage<Record<string, string>>(`plugins.${id}`);
@@ -430,7 +439,7 @@ async function loadScript(id = currentScriptId.value) {
 async function saveScript(value = scriptState.content) {
   if (!currentScriptId.value) return;
   if (isNodeScript()) {
-    await put('/api/node/script', { id: currentScriptId.value, content: value });
+    await put('/api/admin/node/script', { id: currentScriptId.value, content: value });
   } else {
     await saveStorage({ [`plugins.${currentScriptId.value}`]: value }, currentScriptId.value);
   }
@@ -464,7 +473,7 @@ async function formatScript() {
 async function removeScript() {
   if (!currentScriptId.value) return;
   if (isNodeScript()) {
-    await del('/api/node/script', { id: currentScriptId.value });
+    await del('/api/admin/node/script', { id: currentScriptId.value });
   } else {
     await saveStorage({ [`plugins.${currentScriptId.value}`]: 'uninstall' });
   }
@@ -501,7 +510,7 @@ async function createScript() {
   }
   scriptCreateState.saving = true;
   try {
-    const res = await post<ApiEnvelope<{ id: string }>>('/api/node/script', { name: fileName });
+    const res = await post<ApiEnvelope<{ id: string }>>('/api/admin/node/script', { name: fileName });
     const data = apiData(res);
     scriptCreateState.open = false;
     await loadUser();
@@ -561,7 +570,7 @@ const canRemoveStorageBucket = computed(() => !!selectedStorageBucket.value && !
 async function loadStorageBuckets() {
   storageState.loadingBuckets = true;
   try {
-    const res = await get<ApiEnvelope<Array<{ value: string; text?: string }>>>('/api/storage');
+    const res = await get<ApiEnvelope<Array<{ value: string; text?: string }>>>('/api/admin/storage');
     storageState.buckets = (apiData(res) || []).map((item) => ({
       value: item.value,
       label: item.text || item.value,
@@ -573,7 +582,7 @@ async function loadStorageBuckets() {
 async function loadStorage() {
   storageState.loading = true;
   try {
-    const res = await get<ApiEnvelope<{ list: any[]; total: number }>>(`/api/storage/list?keys=${encodeURIComponent(storageState.keys)}`);
+    const res = await get<ApiEnvelope<{ list: any[]; total: number }>>(`/api/admin/storage/list?keys=${encodeURIComponent(storageState.keys)}`);
     storageState.rows = apiData(res)?.list || [];
   } finally {
     storageState.loading = false;
@@ -601,7 +610,7 @@ async function createStorageBucket() {
   }
   storageState.creatingBucket = true;
   try {
-    await post('/api/storage/bucket', { bucket });
+    await post('/api/admin/storage/bucket', { bucket });
     message.success('存储桶已创建');
     storageState.newBucketName = '';
     storageState.createBucketOpen = false;
@@ -649,7 +658,7 @@ async function removeStorageBucket() {
   }
   storageState.deletingBucket = true;
   try {
-    await del('/api/storage/bucket', { bucket });
+    await del('/api/admin/storage/bucket', { bucket });
     message.success('存储桶已删除');
     storageState.keys = 'sillyGirl';
     await loadStorageBuckets();
@@ -661,7 +670,7 @@ async function removeStorageBucket() {
 
 const replies = reactive({ rows: [] as Reply[], total: 0, editing: null as Reply | null, form: {} as Reply });
 async function loadReplies(current = 1, pageSize = 20) {
-  const res = await get<ApiEnvelope<{ list: Reply[]; total: number }>>(`/api/reply/list?current=${current}&pageSize=${pageSize}`);
+  const res = await get<ApiEnvelope<{ list: Reply[]; total: number }>>(`/api/admin/reply/list?current=${current}&pageSize=${pageSize}`);
   const data = apiData(res);
   replies.rows = data?.list || [];
   replies.total = data?.total || 0;
@@ -671,45 +680,58 @@ function openReply(row?: Reply) {
   replies.form = { ...replies.editing };
 }
 async function saveReply() {
-  await post('/api/reply', replies.form);
+  await post('/api/admin/reply', replies.form);
   replies.editing = null;
   message.success('已保存');
   loadReplies();
 }
 async function removeReply(row: Reply) {
-  await del(`/api/reply?id=${row.id}`);
+  await del(`/api/admin/reply?id=${row.id}`);
   message.success('已删除');
   loadReplies();
 }
 
 const masters = reactive({ rows: [] as Master[], platforms: [] as any[], editing: false, form: {} as Master });
 async function loadMasters() {
-  const res = await get<ApiEnvelope<{ list: Master[]; platforms: any[] }>>('/api/master/list');
+  const res = await get<ApiEnvelope<{ list: Master[]; platforms: any[] }>>('/api/admin/master/list');
   const data = apiData(res);
   masters.rows = data?.list || [];
   masters.platforms = data?.platforms || [];
 }
 async function saveMaster() {
-  await post('/api/master', masters.form);
+  await post('/api/admin/master', masters.form);
   masters.editing = false;
   message.success('已保存');
   loadMasters();
 }
 async function removeMaster(row: Master) {
-  await del('/api/master', row);
+  await del('/api/admin/master', row);
   message.success('已删除');
   loadMasters();
 }
 
+const normalUsers = reactive({ rows: [] as AdminUserRow[], total: 0, loading: false });
+async function loadNormalUsers() {
+  normalUsers.loading = true;
+  try {
+    const res = await get<ApiEnvelope<{ list: AdminUserRow[]; total: number }>>('/api/admin/users');
+    const data = apiData(res);
+    normalUsers.rows = data?.list || [];
+    normalUsers.total = data?.total || normalUsers.rows.length;
+  } finally {
+    normalUsers.loading = false;
+  }
+}
+
 const tasks = reactive({ rows: [] as Task[], total: 0, editing: null as Task | null, form: {} as any, scripts: [] as any[] });
 async function loadTasks(current = 1, pageSize = 20) {
-  const res = await get<ApiEnvelope<{ list: Task[]; total: number }>>(`/api/tasks?current=${current}&pageSize=${pageSize}`);
+  const res = await get<ApiEnvelope<{ list: Task[]; total: number }>>(`/api/admin/tasks?current=${current}&pageSize=${pageSize}`);
   const data = apiData(res);
   tasks.rows = data?.list || [];
   tasks.total = data?.total || 0;
 }
 async function loadTaskSelects(taskId = '') {
-  const res = await get<ApiEnvelope<{ scripts?: Record<string, string> }>>(`/api/task/selects?task_id=${encodeURIComponent(taskId)}`);
+  const res = await get<ApiEnvelope<{ scripts?: Record<string, string> }>>(`/api/admin/task/selects?task_id=${encodeURIComponent(taskId)}`);
   tasks.scripts = Object.entries(apiData(res)?.scripts || {})
     .filter(([, label]) => String(label).endsWith('.js'))
     .map(([, label]) => {
@@ -746,31 +768,31 @@ async function saveTask() {
     command: tasks.form.command,
     enable: tasks.form.enable,
   };
-  await post('/api/tasks', payload);
+  await post('/api/admin/tasks', payload);
   tasks.editing = null;
   message.success('已保存');
   loadTasks();
 }
 async function removeTask(row: Task) {
-  await del('/api/tasks', row);
+  await del('/api/admin/tasks', row);
   message.success('已删除');
   loadTasks();
 }
 async function runTask(row: Task) {
-  await get(`/api/tasks/run?task_id=${encodeURIComponent(row.task_id)}`);
+  await get(`/api/admin/tasks/run?task_id=${encodeURIComponent(row.task_id)}`);
   message.success('已触发');
 }
 
 const carry = reactive({ rows: [] as CarryGroup[], total: 0, editing: null as CarryGroup | null, form: {} as any, selects: {} as any });
 async function loadCarry(current = 1, pageSize = 20) {
-  const res = await get<ApiEnvelope<{ list: CarryGroup[]; total: number }>>(`/api/carry/groups?current=${current}&pageSize=${pageSize}`);
+  const res = await get<ApiEnvelope<{ list: CarryGroup[]; total: number }>>(`/api/admin/carry/groups?current=${current}&pageSize=${pageSize}`);
   const data = apiData(res);
   carry.rows = data?.list || [];
   carry.total = data?.total || 0;
 }
 async function loadCarrySelects(row?: CarryGroup) {
   const res = await get<ApiEnvelope<any>>(
-    `/api/carry/group_selects?chat_id=${encodeURIComponent(row?.chat_id || '')}&platform=${encodeURIComponent(row?.platform || '')}`,
+    `/api/admin/carry/group_selects?chat_id=${encodeURIComponent(row?.chat_id || '')}&platform=${encodeURIComponent(row?.platform || '')}`,
   );
   carry.selects = apiData(res) || {};
 }
@@ -805,13 +827,13 @@ async function saveCarry() {
     bots_id: carry.form.bots_id || [],
     scripts: carry.form.scripts || [],
   };
-  await post('/api/carry/group', payload);
+  await post('/api/admin/carry/group', payload);
   carry.editing = null;
   message.success('已保存');
   loadCarry();
 }
 async function removeCarry(row: CarryGroup) {
-  await del('/api/carry/group', row);
+  await del('/api/admin/carry/group', row);
   message.success('已删除');
   loadCarry();
 }
@@ -828,7 +850,7 @@ const qinglong = reactive({
 async function loadQinglongPanels() {
   qinglong.loading = true;
   try {
-    const res = await get<ApiEnvelope<{ list: QinglongPanel[]; total: number }>>('/api/qinglong/panels');
+    const res = await get<ApiEnvelope<{ list: QinglongPanel[]; total: number }>>('/api/admin/qinglong/panels');
     const data = apiData(res);
     qinglong.rows = data?.list || [];
     qinglong.total = data?.total || 0;
@@ -844,7 +866,7 @@ function openQinglongPanel(row?: QinglongPanel) {
 async function testQinglongPanel(panel = qinglong.form) {
   qinglong.testing = true;
   try {
-    await post('/api/qinglong/panel/test', panel);
+    await post('/api/admin/qinglong/panel/test', panel);
     message.success('青龙接口连接成功');
   } catch (error) {
     message.error(error instanceof Error ? error.message : '青龙接口连接失败');
@@ -855,7 +877,7 @@ async function testQinglongPanel(panel = qinglong.form) {
 async function saveQinglongPanel() {
   qinglong.saving = true;
   try {
-    await post('/api/qinglong/panel', qinglong.form);
+    await post('/api/admin/qinglong/panel', qinglong.form);
     qinglong.editing = null;
     message.success('青龙面板已添加');
     await loadQinglongPanels();
@@ -866,7 +888,7 @@ async function saveQinglongPanel() {
   }
 }
 async function removeQinglongPanel(row: QinglongPanel) {
-  await del('/api/qinglong/panel', row);
+  await del('/api/admin/qinglong/panel', row);
   message.success('已删除');
   loadQinglongPanels();
 }
@@ -883,7 +905,7 @@ const smallcat = reactive({
 async function loadSmallcatPanels() {
   smallcat.loading = true;
   try {
-    const res = await get<ApiEnvelope<{ list: SmallcatPanel[]; total: number }>>('/api/smallcat/panels');
+    const res = await get<ApiEnvelope<{ list: SmallcatPanel[]; total: number }>>('/api/admin/smallcat/panels');
     const data = apiData(res);
     smallcat.rows = data?.list || [];
     smallcat.total = data?.total || 0;
@@ -899,7 +921,7 @@ function openSmallcatPanel(row?: SmallcatPanel) {
 async function testSmallcatPanel(panel = smallcat.form) {
   smallcat.testing = true;
   try {
-    await post('/api/smallcat/panel/test', panel);
+    await post('/api/admin/smallcat/panel/test', panel);
     message.success('smallcat API AUTH 验证通过');
   } catch (error) {
     message.error(error instanceof Error ? error.message : 'smallcat 验证失败');
@@ -910,7 +932,7 @@ async function testSmallcatPanel(panel = smallcat.form) {
 async function saveSmallcatPanel() {
   smallcat.saving = true;
   try {
-    await post('/api/smallcat/panel', smallcat.form);
+    await post('/api/admin/smallcat/panel', smallcat.form);
     smallcat.editing = null;
     message.success('smallcat 已添加');
     await loadSmallcatPanels();
@@ -921,7 +943,7 @@ async function saveSmallcatPanel() {
   }
 }
 async function removeSmallcatPanel(row: SmallcatPanel) {
-  await del('/api/smallcat/panel', row);
+  await del('/api/admin/smallcat/panel', row);
   message.success('已删除');
   loadSmallcatPanels();
 }
@@ -938,7 +960,7 @@ const daidai = reactive({
 async function loadDaidaiPanels() {
   daidai.loading = true;
   try {
-    const res = await get<ApiEnvelope<{ list: DaidaiPanel[]; total: number }>>('/api/daidai/panels');
+    const res = await get<ApiEnvelope<{ list: DaidaiPanel[]; total: number }>>('/api/admin/daidai/panels');
     const data = apiData(res);
     daidai.rows = data?.list || [];
     daidai.total = data?.total || 0;
@@ -954,7 +976,7 @@ function openDaidaiPanel(row?: DaidaiPanel) {
 async function testDaidaiPanel(panel = daidai.form) {
   daidai.testing = true;
   try {
-    await post('/api/daidai/panel/test', panel);
+    await post('/api/admin/daidai/panel/test', panel);
     message.success('呆呆面板连接成功');
   } catch (error) {
     message.error(error instanceof Error ? error.message : '呆呆面板连接失败');
@@ -965,7 +987,7 @@ async function testDaidaiPanel(panel = daidai.form) {
 async function saveDaidaiPanel() {
   daidai.saving = true;
   try {
-    await post('/api/daidai/panel', daidai.form);
+    await post('/api/admin/daidai/panel', daidai.form);
     daidai.editing = null;
     message.success('呆呆面板已添加');
     await loadDaidaiPanels();
@@ -976,7 +998,7 @@ async function saveDaidaiPanel() {
   }
 }
 async function removeDaidaiPanel(row: DaidaiPanel) {
-  await del('/api/daidai/panel', row);
+  await del('/api/admin/daidai/panel', row);
   message.success('已删除');
   loadDaidaiPanels();
 }
@@ -1029,7 +1051,7 @@ async function openPluginSourceManager() {
 }
 async function loadPluginSources() {
   try {
-    const res = await get<ApiEnvelope<string[]>>('/api/plugins/sources');
+    const res = await get<ApiEnvelope<string[]>>('/api/admin/plugins/sources');
     plugins.sources = apiData(res) || [];
   } catch {
     plugins.sources = [];
@@ -1062,7 +1084,7 @@ async function addPluginSource() {
   }
   plugins.sourceSaving = true;
   try {
-    const res = await post<ApiEnvelope<{ count?: number }>>('/api/plugins/source', { address });
+    const res = await post<ApiEnvelope<{ count?: number }>>('/api/admin/plugins/source', { address });
     const data = apiData(res);
     plugins.sourceAddress = '';
     plugins.tab = 'all';
@@ -1077,7 +1099,7 @@ async function addPluginSource() {
 async function removePluginSource(address: string) {
   plugins.sourceRemoving[address] = true;
   try {
-    await del('/api/plugins/source', { address });
+    await del('/api/admin/plugins/source', { address });
     message.success('插件源已删除');
     await Promise.all([loadPluginSources(), loadPlugins(1)]);
   } catch (error) {
@@ -1089,7 +1111,7 @@ async function removePluginSource(address: string) {
 async function installPlugin(row: PluginInfo) {
   plugins.installing[row.id] = true;
   try {
-    const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/storage', {
+    const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/admin/storage', {
       [`plugins.${row.id}`]: 'install',
     });
     const data = apiData(res) || {};
@@ -1159,7 +1181,7 @@ async function loadNodeDependencies(plugin = '') {
   nodeDeps.loading = true;
   try {
     const query = plugin ? `?plugin=${encodeURIComponent(plugin)}` : '';
-    const res = await get<ApiEnvelope<{ plugins: NodeDependencyPlugin[]; plugin: string; dependencies: NodeDependencyRow[]; pnpm: typeof nodeDeps.pnpm }>>(`/api/node/dependencies${query}`);
+    const res = await get<ApiEnvelope<{ plugins: NodeDependencyPlugin[]; plugin: string; dependencies: NodeDependencyRow[]; pnpm: typeof nodeDeps.pnpm }>>(`/api/admin/node/dependencies${query}`);
     const data = apiData(res) || {};
     nodeDeps.plugins = data.plugins || [];
     nodeDeps.plugin = data.plugin || '';
@@ -1182,7 +1204,7 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
   }
   nodeDeps.saving = true;
   try {
-    await post('/api/node/dependency', { plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
+    await post('/api/admin/node/dependency', { plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
     after?.();
     message.success('依赖已安装');
     await loadNodeDependencies();
@@ -1195,7 +1217,7 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
 async function installNodeDependencyRow(row: NodeDependencyRow) {
   nodeDeps.saving = true;
   try {
-    await post('/api/node/dependency', { plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
+    await post('/api/admin/node/dependency', { plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
     message.success('依赖已安装');
     await loadNodeDependencies();
   } catch (error) {
@@ -1208,7 +1230,7 @@ async function removeNodeDependency(row: NodeDependencyRow) {
   const key = `${row.plugin}.${row.name}`;
   nodeDeps.removing[key] = true;
   try {
-    await del('/api/node/dependency', { plugin: row.plugin || '__shared__', package: row.name });
+    await del('/api/admin/node/dependency', { plugin: row.plugin || '__shared__', package: row.name });
     message.success('依赖已卸载');
     await loadNodeDependencies();
   } catch (error) {
@@ -1238,7 +1260,7 @@ const pluginConfigOptions = computed(() =>
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
-    const res = await get<ApiEnvelope<any[]>>('/api/plugin/configs');
+    const res = await get<ApiEnvelope<any[]>>('/api/admin/plugin/configs');
     pluginConfigs.rows = apiData(res) || [];
     if (pluginConfigs.selected) {
       const next = pluginConfigs.rows.find((item) => item.uuid === pluginConfigs.selected?.uuid);
@@ -1301,7 +1323,7 @@ async function savePluginConfig() {
   await loadPluginConfigs();
 }
 async function putPluginConfig(uuid: string, value: Record<string, any>) {
-  await put('/api/plugin/config', { uuid, value });
+  await put('/api/admin/plugin/config', { uuid, value });
 }
 
 const settings = reactive({ form: {} as any, githubProxyOptions: [] as string[] });
@@ -1320,12 +1342,14 @@ const settingsKeys = [
   'sillyGirl.storage',
   'sillyGirl.redis_addr',
   'sillyGirl.redis_password',
+  'telegram.token',
+  'telegram.api_base',
 ];
 async function loadSettings() {
   const [res, githubProxyRes, pnpmRegistryRes] = await Promise.all([
     readStorage<Record<string, any>>(settingsKeys.join(',')),
-    get<ApiEnvelope<{ proxy: string; options: string[] }>>('/api/plugins/github-proxy').catch(() => ({ data: { proxy: '', options: [] } })),
-    get<ApiEnvelope<{ registry: string }>>('/api/node/dependency/registry').catch(() => ({ data: { registry: 'https://registry.npmmirror.com' } })),
+    get<ApiEnvelope<{ proxy: string; options: string[] }>>('/api/admin/plugins/github-proxy').catch(() => ({ data: { proxy: '', options: [] } })),
+    get<ApiEnvelope<{ registry: string }>>('/api/admin/node/dependency/registry').catch(() => ({ data: { registry: 'https://registry.npmmirror.com' } })),
   ]);
   const data = apiData(res) || {};
   const githubProxyData = apiData(githubProxyRes) || { proxy: '', options: [] };
@@ -1342,6 +1366,8 @@ async function loadSettings() {
     storage: data['sillyGirl.storage'] === 'redis' ? 'redis' : 'boltdb',
     redis_addr: data['sillyGirl.redis_addr'],
     redis_password: data['sillyGirl.redis_password'],
+    telegram_token: data['telegram.token'],
+    telegram_api_base: data['telegram.api_base'] || 'https://api.telegram.org',
     github_proxy: githubProxyData.proxy || '',
     pnpm_registry: pnpmRegistryData.registry || 'https://registry.npmmirror.com',
   };
@@ -1358,12 +1384,14 @@ async function saveSettings() {
     'sillyGirl.storage': v.storage || 'boltdb',
     'sillyGirl.redis_addr': v.redis_addr || '',
     'sillyGirl.redis_password': v.redis_password || '',
+    'telegram.token': v.telegram_token || '',
+    'telegram.api_base': v.telegram_api_base || 'https://api.telegram.org',
   };
   if (v.password) updates['sillyGirl.password'] = v.password;
   await saveStorage(updates);
   const [githubProxyRes, pnpmRegistryRes] = await Promise.all([
-    put<ApiEnvelope<{ proxy?: string }>>('/api/plugins/github-proxy', { proxy: String(v.github_proxy || '').trim() }),
-    put<ApiEnvelope<{ registry?: string }>>('/api/node/dependency/registry', { registry: String(v.pnpm_registry || '').trim() }),
+    put<ApiEnvelope<{ proxy?: string }>>('/api/admin/plugins/github-proxy', { proxy: String(v.github_proxy || '').trim() }),
+    put<ApiEnvelope<{ registry?: string }>>('/api/admin/node/dependency/registry', { registry: String(v.pnpm_registry || '').trim() }),
   ]);
   settings.form.github_proxy = apiData(githubProxyRes)?.proxy || '';
   settings.form.pnpm_registry = apiData(pnpmRegistryRes)?.registry || settings.form.pnpm_registry;
@@ -1381,7 +1409,7 @@ const messageBuckets = {
 const msgState = reactive({ active: 'listen' as keyof typeof messageBuckets, rows: [] as any[], editing: null as any, form: {} as any, platforms: [] as any[] });
 async function loadMessages() {
   const bucket = messageBuckets[msgState.active].bucket;
-  const res = await get<ApiEnvelope<{ list: any[] }>>(`/api/storage/list?keys=${bucket}`);
+  const res = await get<ApiEnvelope<{ list: any[] }>>(`/api/admin/storage/list?keys=${bucket}`);
   msgState.rows = (apiData(res)?.list || []).map((row) => {
     try {
       return { ...row, ...JSON.parse(row.value || '{}') };
@@ -1389,7 +1417,7 @@ async function loadMessages() {
       return row;
     }
   });
-  const master = await get<ApiEnvelope<{ platforms?: any[] }>>('/api/master/list').catch(() => ({ data: { platforms: [] } }));
+  const master = await get<ApiEnvelope<{ platforms?: any[] }>>('/api/admin/master/list').catch(() => ({ data: { platforms: [] } }));
   msgState.platforms = apiData(master)?.platforms || [];
 }
 function openMessage(row?: any) {
@@ -1419,6 +1447,7 @@ async function removeMessageRow(row: any) {
 watch([page, user], ([p]) => {
   if (!user.value) return;
   if (p === 'reply') loadReplies();
+  if (p === 'users') loadNormalUsers();
   if (p === 'masters') loadMasters();
   if (p === 'tasks') loadTasks();
   if (p === 'carry') loadCarry();
@@ -1451,10 +1480,18 @@ function optionMap(values?: string[]) {
 function recordOptions(record?: Record<string, string>) {
   return Object.entries(record || {}).map(([value, label]) => ({ value, label }));
 }
+function smallcatOpenids(record?: AdminUserRow) {
+  const rows = [] as string[];
+  if (record?.bindings?.smallcat_openid) rows.push(record.bindings.smallcat_openid);
+  for (const item of record?.bindings?.smallcat_openids || []) {
+    if (item) rows.push(item);
+  }
+  return Array.from(new Set(rows.map((item) => item.trim()).filter(Boolean)));
+}
 </script>
 
 <template>
-  <a-config-provider :locale="zhCN">
+  <ConfigProvider :locale="zhCN">
     <AntApp>
       <div v-if="!booting && !user" class="login-page">
         <div class="login-card">
@@ -1520,12 +1557,14 @@ function recordOptions(record?: Record<string, string>) {
                 <Tag color="green">最新版本 {{ overviewVersion.remote }}</Tag>
                 <Typography.Link :href="overviewVersion.repository" target="_blank">GitHub</Typography.Link>
               </Space>
-              <a-row :gutter="[12, 12]">
-                <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="脚本数量" :value="realScripts.length" /></Card></a-col>
-                <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="青龙容器" :value="overviewIntegrations.find((item) => item.key === 'qinglong')?.count || 0" /></Card></a-col>
-                <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="smallcat" :value="overviewIntegrations.find((item) => item.key === 'smallcat')?.count || 0" /></Card></a-col>
-                <a-col :xs="24" :sm="12" :md="8"><Card><Statistic title="呆呆容器" :value="overviewIntegrations.find((item) => item.key === 'daidai')?.count || 0" /></Card></a-col>
-              </a-row>
+              <Row :gutter="[12, 12]">
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="脚本数量" :value="realScripts.length" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="今日新增用户" :value="overviewUserStats.today" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="总用户数量" :value="overviewUserStats.total" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="青龙容器" :value="overviewIntegrations.find((item) => item.key === 'qinglong')?.count || 0" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="smallcat" :value="overviewIntegrations.find((item) => item.key === 'smallcat')?.count || 0" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="呆呆容器" :value="overviewIntegrations.find((item) => item.key === 'daidai')?.count || 0" /></Card></Col>
+              </Row>
               <div style="margin-top: 16px">
                 <div class="toolbar">
                   <div class="toolbar-left">
@@ -1602,7 +1641,7 @@ function recordOptions(record?: Record<string, string>) {
                       </span>
                       <Tag v-if="isNewScriptEntry(item)" color="blue">新建</Tag>
                     </button>
-                    <a-empty v-if="scriptFileRows.length === 0" description="暂无脚本文件" />
+                    <Empty v-if="scriptFileRows.length === 0" description="暂无脚本文件" />
                   </div>
                 </aside>
 
@@ -1688,7 +1727,7 @@ function recordOptions(record?: Record<string, string>) {
                   </template>
                 </Table.Column>
               </Table>
-              <a-empty v-if="!nodeDeps.loading && nodeDeps.rows.length === 0" description="暂未识别到插件需要依赖。" />
+              <Empty v-if="!nodeDeps.loading && nodeDeps.rows.length === 0" description="暂未识别到插件需要依赖。" />
             </section>
 
             <section v-if="page === 'storage'" class="panel">
@@ -1749,6 +1788,70 @@ function recordOptions(record?: Record<string, string>) {
                       <Input.TextArea v-model:value="record.value" :auto-size="{ minRows: 1, maxRows: 6 }" />
                       <Button @click="saveStorageRow(record)"><Save :size="16" /></Button>
                     </Space.Compact>
+                  </template>
+                </Table.Column>
+              </Table>
+            </section>
+
+            <section v-if="page === 'users'" class="panel">
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <Typography.Text strong>普通用户</Typography.Text>
+                  <Tag>{{ normalUsers.total }}</Tag>
+                </div>
+                <Button @click="loadNormalUsers"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+              </div>
+              <Table
+                row-key="id"
+                :loading="normalUsers.loading"
+                :data-source="normalUsers.rows"
+                :pagination="{ pageSize: 20, total: normalUsers.total }"
+              >
+                <Table.Column title="#" :width="72">
+                  <template #default="{ index }">{{ index + 1 }}</template>
+                </Table.Column>
+                <Table.Column title="账号" data-index="username" :width="180">
+                  <template #default="{ record }">
+                    <Space direction="vertical" size="small">
+                      <Typography.Text strong>{{ record.username }}</Typography.Text>
+                      <Typography.Text class="muted">{{ record.nickname || '-' }}</Typography.Text>
+                    </Space>
+                  </template>
+                </Table.Column>
+                <Table.Column title="smallcat openid" :width="300">
+                  <template #default="{ record }">
+                    <Space v-if="smallcatOpenids(record).length" direction="vertical" size="small">
+                      <Typography.Text
+                        v-for="openid in smallcatOpenids(record)"
+                        :key="openid"
+                        class="mono"
+                        :copyable="true"
+                      >
+                        {{ openid }}
+                      </Typography.Text>
+                    </Space>
+                    <Typography.Text v-else class="muted">-</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="QQ" :width="150">
+                  <template #default="{ record }">
+                    <Typography.Text class="mono">{{ record.bindings?.qq || '-' }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="TGID" :width="170">
+                  <template #default="{ record }">
+                    <Typography.Text class="mono">{{ record.bindings?.telegram || '-' }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="绑定更新时间" :width="180">
+                  <template #default="{ record }">{{ timestamp(record.bindings?.updated_at) }}</template>
+                </Table.Column>
+                <Table.Column title="注册时间" data-index="created_at" :width="180">
+                  <template #default="{ text }">{{ timestamp(text) }}</template>
+                </Table.Column>
+                <Table.Column title="状态" :width="100">
+                  <template #default="{ record }">
+                    <Tag :color="record.disabled ? 'default' : 'green'">{{ record.disabled ? '禁用' : '正常' }}</Tag>
                   </template>
                 </Table.Column>
               </Table>
@@ -2057,7 +2160,7 @@ function recordOptions(record?: Record<string, string>) {
                     </template>
                   </Form>
                 </div>
-                <a-empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件安装后会自动注册顶层声明的 SillyGirlPluginConfig/form 配置。'" />
+                <Empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件安装后会自动注册顶层声明的 SillyGirlPluginConfig/form 配置。'" />
               </Spin>
             </section>
 
@@ -2086,6 +2189,13 @@ function recordOptions(record?: Record<string, string>) {
                 <Form.Item label="pnpm 镜像" extra="用于安装和更新脚本插件的 NodeJS 依赖。">
                   <Input v-model:value="settings.form.pnpm_registry" placeholder="https://registry.npmmirror.com" />
                 </Form.Item>
+                <Typography.Title :level="5">Telegram Bot</Typography.Title>
+                <Form.Item label="Token" extra="BotFather 提供的 Bot Token，保存后 Telegram 适配器会自动重启。">
+                  <Input.Password v-model:value="settings.form.telegram_token" placeholder="123456:ABC-DEF..." />
+                </Form.Item>
+                <Form.Item label="代理 API" extra="Telegram Bot API 地址，默认 https://api.telegram.org；网络不通时填写兼容反代地址。">
+                  <Input v-model:value="settings.form.telegram_api_base" placeholder="https://api.telegram.org" />
+                </Form.Item>
                 <Form.Item label="调试模式"><Switch v-model:checked="settings.form.debug" /></Form.Item>
                 <Form.Item label="未监听群允许管理员触发"><Switch v-model:checked="settings.form.listen_admin" /></Form.Item>
                 <Button type="primary" @click="saveSettings"><template #icon><Save :size="16" /></template>保存设置</Button>
@@ -2109,7 +2219,7 @@ function recordOptions(record?: Record<string, string>) {
           </main>
         </Layout>
 
-        <a-drawer
+        <Drawer
           v-model:open="mobileMenuOpen"
           class="mobile-menu-drawer"
           placement="left"
@@ -2119,7 +2229,7 @@ function recordOptions(record?: Record<string, string>) {
         >
           <div class="brand"><span class="brand-mark">S</span><span>SillyGirl</span></div>
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
-        </a-drawer>
+        </Drawer>
       </Layout>
 
       <Modal
@@ -2290,5 +2400,5 @@ function recordOptions(record?: Record<string, string>) {
         <Form layout="vertical"><Form.Item :label="msgState.active === 'private' ? '用户 ID' : '群号'"><Input v-model:value="msgState.form.key" :disabled="!!msgState.editing?.value" /></Form.Item><Form.Item label="平台"><Select v-model:value="msgState.form.platform" :options="msgState.platforms" /></Form.Item><Form.Item label="说明"><Input v-model:value="msgState.form.desc" /></Form.Item><Form.Item label="启用"><Switch v-model:checked="msgState.form.enable" /></Form.Item></Form>
       </Modal>
     </AntApp>
-  </a-config-provider>
+  </ConfigProvider>
 </template>
