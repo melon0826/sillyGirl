@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,12 +47,15 @@ func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	pnpm, ok := manifest["pnpm"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("missing pnpm settings in %s", string(data))
+	if _, ok := manifest["pnpm"]; ok {
+		t.Fatalf("unexpected deprecated pnpm settings in %s", string(data))
 	}
-	if !jsonArrayContainsString(pnpm["onlyBuiltDependencies"], "protobufjs") {
-		t.Fatalf("missing protobufjs onlyBuiltDependencies in %#v", pnpm["onlyBuiltDependencies"])
+	workspace, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(workspace), "allowBuilds:\n  protobufjs: true\n") {
+		t.Fatalf("missing protobufjs allowBuilds in %s", string(workspace))
 	}
 }
 
@@ -68,12 +72,15 @@ func TestEnsureNodePackageJSONCreatesPnpmBuildAllowlist(t *testing.T) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	pnpm, ok := manifest["pnpm"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("missing pnpm settings in %s", string(data))
+	if _, ok := manifest["pnpm"]; ok {
+		t.Fatalf("unexpected deprecated pnpm settings in %s", string(data))
 	}
-	if !jsonArrayContainsString(pnpm["onlyBuiltDependencies"], "protobufjs") {
-		t.Fatalf("missing protobufjs onlyBuiltDependencies in %#v", pnpm["onlyBuiltDependencies"])
+	workspace, err := os.ReadFile(filepath.Join(dir, "pnpm-workspace.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(workspace), "allowBuilds:\n  protobufjs: true\n") {
+		t.Fatalf("missing protobufjs allowBuilds in %s", string(workspace))
 	}
 }
 
@@ -127,17 +134,4 @@ func TestNormalizeNodeScriptFileName(t *testing.T) {
 			t.Fatalf("normalizeNodeScriptFileName(%q) = %q, want %q", tt.name, got, tt.want)
 		}
 	}
-}
-
-func jsonArrayContainsString(value interface{}, want string) bool {
-	items, ok := value.([]interface{})
-	if !ok {
-		return false
-	}
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
 }

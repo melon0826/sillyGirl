@@ -40,8 +40,9 @@ RUN apt-get update \
     && corepack prepare pnpm@11.16.0 --activate \
     && mkdir -p /app/node-runtime \
     && cd /app/node-runtime \
-    && printf '{"name":"sillygirl-node-runtime","private":true,"version":"1.0.0","pnpm":{"onlyBuiltDependencies":["protobufjs"]}}\n' > package.json \
-    && pnpm add @grpc/grpc-js@^1.8.18 express@^4.21.2 google-protobuf@^3.21.2 \
+    && printf '{"name":"sillygirl-node-runtime","private":true,"version":"1.0.0"}\n' > package.json \
+    && printf 'packages:\n  - .\nallowBuilds:\n  protobufjs: true\n' > pnpm-workspace.yaml \
+    && pnpm --allow-build=protobufjs add @grpc/grpc-js@^1.8.18 express@^4.21.2 google-protobuf@^3.21.2 \
     && mkdir -p /data/plugins /data/conf \
     && ln -s /data/plugins /app/plugins \
     && ln -s /data/conf /app/conf

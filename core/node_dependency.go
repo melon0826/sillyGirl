@@ -44,11 +44,6 @@ type nodeDependencyManifest struct {
 	Private         bool              `json:"private"`
 	Dependencies    map[string]string `json:"dependencies"`
 	DevDependencies map[string]string `json:"devDependencies"`
-	Pnpm            nodePnpmSettings  `json:"pnpm,omitempty"`
-}
-
-type nodePnpmSettings struct {
-	OnlyBuiltDependencies []string `json:"onlyBuiltDependencies,omitempty"`
 }
 
 type nodeDependencyRequest struct {
@@ -768,9 +763,11 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 			return fmt.Errorf("package.json 解析失败：%v", err)
 		}
 		if changed {
-			return os.WriteFile(path, normalized, 0644)
+			if err := os.WriteFile(path, normalized, 0644); err != nil {
+				return err
+			}
 		}
-		return nil
+		return ensureNodePnpmWorkspace(dir)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -779,15 +776,15 @@ func ensureNodePackageJSON(dir, pluginName string) error {
 		Version:      "1.0.0",
 		Private:      true,
 		Dependencies: nodeSillygirlRuntimeDependencyCopy(),
-		Pnpm: nodePnpmSettings{
-			OnlyBuiltDependencies: nodePnpmOnlyBuiltDependencyCopy(),
-		},
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0644)
+	if err := os.WriteFile(path, append(data, '\n'), 0644); err != nil {
+		return err
+	}
+	return ensureNodePnpmWorkspace(dir)
 }
 
 func ensureNodeSillygirlModule(dir string) error {
@@ -860,6 +857,20 @@ func nodeSillygirlRuntimeDependencyCopy() map[string]string {
 	return deps
 }
 
+func ensureNodePnpmWorkspace(dir string) error {
+	path := filepath.Join(dir, "pnpm-workspace.yaml")
+	content := "packages:\n  - .\nallowBuilds:\n"
+	for _, name := range nodePnpmOnlyBuiltDependencies {
+		content += fmt.Sprintf("  %s: true\n", name)
+	}
+	if data, err := os.ReadFile(path); err == nil && string(data) == content {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
 func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, error) {
 	manifest := map[string]interface{}{}
 	if err := json.Unmarshal(data, &manifest); err != nil {
@@ -900,9 +911,8 @@ func normalizeNodePackageJSON(data []byte, pluginName string) ([]byte, bool, err
 		}
 	}
 	manifest["dependencies"] = dependencies
-	pnpm, pnpmChanged := normalizeNodePackagePnpmSettings(manifest["pnpm"])
-	if pnpmChanged {
-		manifest["pnpm"] = pnpm
+	if _, ok := manifest["pnpm"]; ok {
+		delete(manifest, "pnpm")
 		changed = true
 	}
 	if !changed {
@@ -938,57 +948,6 @@ func normalizeNodePackageDependencyField(value interface{}) (map[string]string, 
 		normalized[name] = text
 	}
 	return normalized, changed
-}
-
-func nodePnpmOnlyBuiltDependencyCopy() []string {
-	values := make([]string, len(nodePnpmOnlyBuiltDependencies))
-	copy(values, nodePnpmOnlyBuiltDependencies)
-	return values
-}
-
-func normalizeNodePackagePnpmSettings(value interface{}) (map[string]interface{}, bool) {
-	settings, ok := value.(map[string]interface{})
-	if !ok {
-		settings = map[string]interface{}{}
-	}
-	changed := !ok
-	existing := map[string]bool{}
-	list := []interface{}{}
-	switch raw := settings["onlyBuiltDependencies"].(type) {
-	case []interface{}:
-		for _, item := range raw {
-			text := strings.TrimSpace(fmt.Sprint(item))
-			if text == "" || text == "<nil>" || existing[text] {
-				changed = true
-				continue
-			}
-			existing[text] = true
-			list = append(list, text)
-		}
-	case []string:
-		for _, item := range raw {
-			text := strings.TrimSpace(item)
-			if text == "" || existing[text] {
-				changed = true
-				continue
-			}
-			existing[text] = true
-			list = append(list, text)
-		}
-	case nil:
-		changed = true
-	default:
-		changed = true
-	}
-	for _, name := range nodePnpmOnlyBuiltDependencies {
-		if !existing[name] {
-			existing[name] = true
-			list = append(list, name)
-			changed = true
-		}
-	}
-	settings["onlyBuiltDependencies"] = list
-	return settings, changed
 }
 
 func safePackageName(name string) string {
