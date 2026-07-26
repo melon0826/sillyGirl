@@ -5,6 +5,7 @@ import json
 import os
 import pickle
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -1033,6 +1034,130 @@ async def sleep(ms=1000):
 
 async def restart():
     return await Bucket("sillyGirl").set("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def _compact_runtime_output(value):
+    text = str(value or "").strip()
+    if len(text) > 2000:
+        return text[:2000] + "..."
+    return text
+
+
+def _run_process(cwd, args, timeout=120):
+    proc = subprocess.run(
+        args,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        timeout=max(10, min(int(timeout or 120), 600)),
+        check=False,
+    )
+    if proc.returncode != 0:
+        message = _compact_runtime_output(proc.stderr or proc.stdout)
+        raise RuntimeError(message or f"{args[0]} 执行失败：exit {proc.returncode}")
+    return {
+        "stdout": proc.stdout or "",
+        "stderr": proc.stderr or "",
+    }
+
+
+def _add_repo_candidate(candidates, value):
+    path = str(value or "").strip()
+    if not path:
+        return
+    path = os.path.abspath(path)
+    if path not in candidates:
+        candidates.append(path)
+
+
+def _is_sillygirl_repo(path, timeout):
+    if not os.path.isdir(path):
+        return False
+    try:
+        _run_process(path, ["git", "rev-parse", "--is-inside-work-tree"], timeout)
+        remote = _run_process(path, ["git", "config", "--get", "remote.origin.url"], timeout)["stdout"]
+        remote = remote.strip().lower()
+        return "sillygirl" in remote and "sillygirl_plugins" not in remote and "sillygirl-plugins" not in remote
+    except Exception:
+        return False
+
+
+def _resolve_sillygirl_repo(configured=None, timeout=120):
+    candidates = []
+    _add_repo_candidate(candidates, configured)
+    for env_key in ("SILLYGIRL_APP_DIR", "APP_HOME", "HOME"):
+        _add_repo_candidate(candidates, os.environ.get(env_key))
+    _add_repo_candidate(candidates, os.getcwd())
+    _add_repo_candidate(candidates, "/app")
+    _add_repo_candidate(candidates, "/data/sillyGirl")
+
+    for path in list(candidates):
+        parent = os.path.abspath(os.path.join(path, os.pardir))
+        _add_repo_candidate(candidates, parent)
+
+    for path in candidates:
+        if _is_sillygirl_repo(path, timeout):
+            return path
+    raise RuntimeError("未找到可更新的 SillyGirl Git 仓库")
+
+
+def _current_branch(repo, timeout):
+    branch = _run_process(repo, ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout)["stdout"].strip()
+    if not branch or branch == "HEAD":
+        raise RuntimeError("当前仓库处于 detached HEAD，请显式指定 branch")
+    return branch
+
+
+def _pull_args(repo, remote="origin", branch=None, timeout=120):
+    remote = str(remote or "origin").strip() or "origin"
+    branch = str(branch or "").strip() or _current_branch(repo, timeout)
+    upstream = f"{remote}/{branch}"
+    _run_process(repo, ["git", "rev-parse", "--verify", upstream], timeout)
+    return ["git", "pull", "--ff-only", remote, branch]
+
+
+async def update(options=None):
+    try:
+        options = options or {}
+        if isinstance(options, str):
+            options = {"appDir": options}
+        if not isinstance(options, dict):
+            raise RuntimeError("update options 必须是 dict 或 appDir 字符串")
+        timeout = max(10, min(int(options.get("timeout") or 120), 600))
+        remote = str(options.get("gitRemote") or "origin").strip() or "origin"
+        repo = await asyncio.to_thread(_resolve_sillygirl_repo, options.get("appDir"), timeout)
+        before = (
+            await asyncio.to_thread(_run_process, repo, ["git", "rev-parse", "--short", "HEAD"], timeout)
+        )["stdout"].strip()
+        await asyncio.to_thread(_run_process, repo, ["git", "fetch", remote, "--prune"], timeout)
+        pull_args = await asyncio.to_thread(_pull_args, repo, remote, options.get("gitBranch"), timeout)
+        pull = await asyncio.to_thread(
+            _run_process,
+            repo,
+            pull_args,
+            timeout,
+        )
+        after = (
+            await asyncio.to_thread(_run_process, repo, ["git", "rev-parse", "--short", "HEAD"], timeout)
+        )["stdout"].strip()
+        restarted = bool(options.get("restart"))
+        if restarted:
+            await restart()
+        return {
+            "status": True,
+            "message": "更新完成",
+            "data": {
+                "mode": "git",
+                "repo": repo,
+                "before": before,
+                "after": after,
+                "changed": before != after,
+                "output": _compact_runtime_output(pull.get("stdout") or pull.get("stderr")),
+                "restarted": restarted,
+            },
+        }
+    except Exception as exc:
+        return {"status": False, "message": str(exc), "data": None}
 
 
 class Console:

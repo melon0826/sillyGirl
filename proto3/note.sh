@@ -14,7 +14,7 @@ protoc-gen-grpc --ts_out=service=grpc-node:.  srpc.proto
 
 #protoc-gen-grpc --python_out=.  srpc.proto
 #protoc --python_out=.  srpc.proto
-# pip install "grpcio-tools==1.43.0"
+# pip install --upgrade "grpcio-tools==1.83.0"
 python3 -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. srpc.proto
 
 

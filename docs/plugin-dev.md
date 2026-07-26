@@ -5,6 +5,7 @@ SillyGirl 的插件系统基于外部脚本运行时。插件以 `.js` 或 `.py`
 ## 目录
 
 - [插件结构](#插件结构)
+- [Python 插件](#python-插件)
 - [注释元数据](#注释元数据)
 - [搬运处理脚本](#搬运处理脚本)
 - [脚本定时任务](#脚本定时任务)
@@ -39,7 +40,7 @@ SillyGirl 的插件系统基于外部脚本运行时。插件以 `.js` 或 `.py`
 
 NodeJS 依赖是插件目录共享的，所有 NodeJS 插件共用 `/data/plugins/package.json` 和 `/data/plugins/node_modules`。旧版
 `/data/plugins/插件名/main.js` 仍会兼容加载，但新建和插件市场安装都会写入 `/data/plugins/插件名.js`。
-Python 插件使用 Python 3.12，文件为 `/data/plugins/插件名.py`。Docker 镜像已内置 Python 3.12、pipx、`grpcio` 和 `protobuf`；本地运行时需要自行安装 Python 3.12、pipx 并确保 `grpcio`、`protobuf` 可导入。
+Python 插件使用 Python 3.12，文件为 `/data/plugins/插件名.py`。Docker 镜像已内置 Python 3.12、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1`；本地运行时需要自行安装 Python 3.12 和 pipx。
 
 ```js
 /**
@@ -68,6 +69,211 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Python 插件
+
+Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置表单、定时任务和插件市场逻辑。差别主要在运行时和 SDK 调用方式。
+
+### 运行环境
+
+| 项目 | 说明 |
+|------|------|
+| Python 版本 | 固定使用 Python 3.12。Docker 镜像已内置；本地 `go run` 时需要机器上能执行 `python3.12`，或配置 `SILLYGIRL_PYTHON_BIN` |
+| SDK 路径 | 程序会把 `sillygirl.py`、`srpc_pb2.py`、`srpc_pb2_grpc.py` 加入 `PYTHONPATH`，插件直接 `from sillygirl import ...` |
+| gRPC 依赖 | 运行时自动准备 `grpcio==1.83.0`、`protobuf==7.35.1` |
+| 第三方依赖 | 通过 `@depe ["包名"]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python |
+| 依赖管理 | Python 依赖由 pipx 管理，统一安装到 `/data/plugins/python_packages`，所有 Python 插件共享 |
+| 文件结构 | 推荐 `/data/plugins/插件名.py` 扁平文件；插件市场按索引 `path` 写入同名 `.py` 文件 |
+
+本地运行时可以按需指定：
+
+```bash
+export SILLYGIRL_PYTHON_BIN=python3.12
+export SILLYGIRL_PIPX=pipx
+```
+
+Windows PowerShell：
+
+```powershell
+$env:SILLYGIRL_PYTHON_BIN = "py -3.12"
+$env:SILLYGIRL_PIPX = "pipx"
+```
+
+### 异步调用约定
+
+Python SDK 方法都是异步方法，必须在 `async def main()` 中 `await`：
+
+```python
+content = await s.getContent()
+user_id = await s.getUserId()
+await s.reply("收到：" + content)
+```
+
+不要写成：
+
+```python
+content = s.getContent()
+s.reply("收到")
+```
+
+上面的写法只会得到 coroutine 对象，或者导致脚本未真正发送回复。
+
+### 常用 API
+
+```python
+from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update
+
+content = await s.getContent()
+user_id = await s.getUserId()
+chat_id = await s.getChatId()
+platform = await s.getPlatform()
+is_admin = await s.isAdmin()
+city = await s.param("城市")
+await s.reply("文本")
+await pushAdmin("管理员通知")
+await restart()
+update_result = await update({"restart": True})
+```
+
+### Bucket 存储
+
+```python
+from sillygirl import Bucket
+
+db = Bucket("python-demo")
+
+await db.set("count", 1)
+count = await db.get("count", 0)
+keys = await db.keys()
+await db.delete("count")
+```
+
+不同插件建议使用不同 Bucket 名称，避免覆盖其他插件的数据。
+
+### 配置表单
+
+Python 插件支持和 NodeJS 一样的声明式配置。配置对象建议在文件顶层创建，这样插件安装后触发一次规则或设置 `@on_start true` 时，后台「插件配置」就能注册到表单。
+
+```python
+from sillygirl import sender as s, sillyGirlCreateSchema, SillyGirlPluginConfig
+
+schema = sillyGirlCreateSchema.object({
+    "apiBase": sillyGirlCreateSchema.string()
+        .setTitle("接口地址")
+        .setDefault("http://127.0.0.1:8081"),
+    "token": sillyGirlCreateSchema.string()
+        .setTitle("Token")
+        .setFormat("password")
+        .setDefault(""),
+    "enabled": sillyGirlCreateSchema.boolean()
+        .setTitle("启用")
+        .setDefault(False),
+})
+
+config = SillyGirlPluginConfig(schema)
+
+
+async def main():
+    values = await config.get()
+    if not values.get("token"):
+        await s.reply("请先到后台插件配置填写 Token")
+        return
+```
+
+### 依赖声明
+
+第三方 Python 包写在 `@depe`，格式是 JSON 数组：
+
+```python
+"""
+* @title HTTP 示例
+* @rule raw ^请求测试$
+* @depe ["requests"]
+"""
+```
+
+支持版本约束：
+
+```python
+"""
+* @depe ["requests==2.32.0", "beautifulsoup4"]
+"""
+```
+
+注意：
+
+- `os`、`sys`、`json`、`asyncio`、`time`、`pathlib` 等标准库不要写进 `@depe`。
+- Python 依赖是共享安装，卸载依赖前确认没有其他插件还在使用。
+- 插件仓库的索引 `dependencies` 字段由插件注释里的 `@depe` 生成；没有索引时，SillyGirl 会保底读取脚本注释。
+
+### Python 定时任务
+
+```python
+"""
+* @title Python定时提醒
+* @cron 0 9 * * *
+"""
+
+import asyncio
+from sillygirl import sender as s
+
+
+async def main():
+    await s.reply("早上 9 点提醒")
+
+
+asyncio.run(main())
+```
+
+`@cron` 只写表达式，不要在后面追加平台。Admin 面板里手动创建 `python 插件名.py` 定时任务时，也会把表达式写回脚本注释。
+
+### Python Web 常驻脚本
+
+`@web true` 会让脚本作为常驻进程启动，端口和路由由脚本自己监听。下面示例只用标准库，不需要额外依赖：
+
+```python
+"""
+* @title PythonWeb示例
+* @web true
+"""
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != "/health":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = json.dumps({"status": True, "message": "ok", "data": None}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+HTTPServer(("0.0.0.0", 3002), Handler).serve_forever()
+```
+
+### 内联客户端
+
+Python 插件可以引入内联客户端，构造方式和 JS 一样，按后台页面编号选择实例：
+
+```python
+ql = QingLong({"id": 1})
+envs = await ql.getEnvs({"searchValue": "JD_COOKIE"})
+
+sc = SmallCat({"id": 1})
+code = await sc.getCode({"openid": "openid", "appid": "wx123"})
+
+dd = DaiDai({"id": 1})
+items = await dd.getEnvs({"keyword": "JD_COOKIE"})
+```
+
+所有客户端方法仍然需要 `await`。
 
 插件文件可以包含多个 `@rule`，每条规则独立匹配：
 

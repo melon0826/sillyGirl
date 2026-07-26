@@ -93,12 +93,6 @@ func initNodePlugins() {
 				}
 			case 2:
 				class, plugin_index = CheckMainIndex(files[1])
-				// if files[1] == "main.js" {
-				// 	if files[1] == "main.js" {
-				// 		plugin_index = true
-				// 	}
-				// 	// fmt.Println("入口文件事件")
-				// }
 				plugin_name = files[0]
 			}
 			if plugin_name == "." {

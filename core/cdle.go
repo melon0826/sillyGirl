@@ -41,27 +41,4 @@ func init() {
 			},
 		},
 	})
-
-	// 原创记录
-	// var pcr = MakeBucket("pcr")
-	// GinApi(POST, "/api/plugins/record", func(c *gin.Context) {
-	// 	data, _ := ioutil.ReadAll(c.Request.Body)
-	// 	str, _ := EncryptByAes(data)
-	// 	v := PluginCreateRecord{}
-	// 	if json.Unmarshal([]byte(str), &v) == nil {
-	// 		o := v
-	// 		pcr.First(o)
-	// 		if o.MachineID != "" {
-	// 			pcr.Create(v)
-	// 		}
-	// 	}
-	// })
 }
-
-// type PluginCreateRecord struct {
-// 	ID        string `json:"id"`
-// 	Unix      int64  `json:"unix"`
-// 	MachineID string `json:"machine_id"`
-// 	IP        string `json:"ip"`
-// 	Title     string `json:"title"`
-// }

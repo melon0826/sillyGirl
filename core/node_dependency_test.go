@@ -161,3 +161,27 @@ func TestNormalizePipxRegistryDefault(t *testing.T) {
 		t.Fatalf("normalizePipxRegistry(\"\") = %q; want %q", got, defaultPipxRegistry)
 	}
 }
+
+func TestPythonRuntimeDependencyRequiresGeneratedVersions(t *testing.T) {
+	if pythonGrpcRuntimeDependency != "grpcio==1.83.0" {
+		t.Fatalf("pythonGrpcRuntimeDependency = %q", pythonGrpcRuntimeDependency)
+	}
+	if pythonProtobufRuntimeDependency != "protobuf==7.35.1" {
+		t.Fatalf("pythonProtobufRuntimeDependency = %q", pythonProtobufRuntimeDependency)
+	}
+	if pythonRuntimeDependencyInstalled(pythonProtobufRuntimeDependency, map[string]string{"protobuf": "7.35.0"}) {
+		t.Fatal("protobuf 7.35.0 should not satisfy the Python runtime protobuf constraint")
+	}
+	if !pythonRuntimeDependencyInstalled(pythonProtobufRuntimeDependency, map[string]string{"protobuf": "7.35.1"}) {
+		t.Fatal("protobuf 7.35.1 should satisfy the Python runtime protobuf constraint")
+	}
+	if pythonRuntimeDependencyInstalled(pythonProtobufRuntimeDependency, map[string]string{"protobuf": "8.0.0"}) {
+		t.Fatal("protobuf 8.0.0 should not satisfy the pinned Python runtime protobuf constraint")
+	}
+	if pythonRuntimeDependencyInstalled(pythonGrpcRuntimeDependency, map[string]string{"grpcio": "1.82.0"}) {
+		t.Fatal("grpcio 1.82.0 should not satisfy the Python runtime grpcio constraint")
+	}
+	if !pythonRuntimeDependencyInstalled(pythonGrpcRuntimeDependency, map[string]string{"grpcio": "1.83.0"}) {
+		t.Fatal("grpcio 1.83.0 should satisfy the Python runtime grpcio constraint")
+	}
+}

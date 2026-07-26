@@ -1,6 +1,6 @@
 ---
 name: sillygirl-plugin-writer
-description: Use when writing, migrating, reviewing, or fixing SillyGirl NodeJS script plugins. Covers plugin metadata comments, message rules, cron/web/carry scripts, configuration schemas, sender/Bucket APIs, and inline QingLong/SmallCat/DaiDai clients.
+description: Use when writing, migrating, reviewing, or fixing SillyGirl NodeJS or Python script plugins. Covers plugin metadata comments, message rules, cron/web/carry scripts, configuration schemas, sender/Bucket APIs, dependency declarations, and inline QingLong/SmallCat/DaiDai clients.
 ---
 
 # SillyGirl Plugin Writer
@@ -9,8 +9,9 @@ Use this skill to write SillyGirl script plugins for this repository.
 
 ## Ground Rules
 
-- Write plugins as CommonJS NodeJS files.
-- Import runtime APIs from `sillygirl`:
+- Prefer CommonJS NodeJS plugins unless the user asks for Python.
+- Python plugins must target Python 3.12 and await all SillyGirl SDK calls.
+- Import NodeJS runtime APIs from `sillygirl`:
 
 ```js
 const {
@@ -29,12 +30,19 @@ const {
 } = require('sillygirl');
 ```
 
+- Import Python runtime APIs from `sillygirl`:
+
+```python
+from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update
+```
+
 - Do not use Goja-only APIs or BNCR globals.
 - Do not use `BncrDB`, `BncrCreateSchema`, or `BncrPluginConfig`.
 - Do not invent wrappers that change third-party API response shapes. Return or reply with the original API meaning unless the user asks for formatting.
 - Prefer `async function main() { ... }` and end with `main().catch(...)`.
 - Always handle exceptions and reply with a useful error message.
 - Never hard-code secrets in plugin code. Use `SillyGirlPluginConfig`, `Bucket`, or environment variables.
+- Declare third-party dependencies with `@depe ["package"]`; NodeJS uses pnpm, Python uses pipx.
 
 ## Metadata Header
 
@@ -117,6 +125,21 @@ const isAdmin = await s.isAdmin();
 await s.reply('回复内容');
 ```
 
+For Python, always await SDK calls:
+
+```python
+import asyncio
+from sillygirl import sender as s
+
+
+async def main():
+    content = await s.getContent()
+    await s.reply('收到：' + content)
+
+
+asyncio.run(main())
+```
+
 Common methods:
 
 - `s.getContent()`
@@ -139,6 +162,17 @@ const db = new Bucket('my-plugin');
 const oldValue = await db.get('key', '');
 await db.set('key', 'value');
 await db.delete('key');
+```
+
+Python:
+
+```python
+from sillygirl import Bucket
+
+db = Bucket('my-plugin')
+value = await db.get('key', '')
+await db.set('key', 'value')
+await db.delete('key')
 ```
 
 Use one bucket per plugin or feature. Avoid writing to shared buckets like `sillyGirl` unless the user explicitly asks.
@@ -164,6 +198,62 @@ const token = await Config.get('token', '');
 ```
 
 Config registration must run at plugin load time, not inside a branch that may never execute.
+
+## Python Plugins
+
+Use Python only when requested or when the plugin naturally benefits from Python libraries.
+
+Python plugin header:
+
+```python
+"""
+* @title Python示例
+* @rule raw ^你好$
+* @version v1.0.0
+* @depe ["requests"]
+"""
+```
+
+Runtime facts:
+
+- Python version is fixed to 3.12.
+- Built-in runtime dependencies are `grpcio==1.83.0` and `protobuf==7.35.1`.
+- Third-party dependencies are installed by pipx into `/data/plugins/python_packages`.
+- Standard-library modules such as `os`, `sys`, `json`, `asyncio`, `time`, and `pathlib` should not be listed in `@depe`.
+- All SDK calls are async and must be awaited.
+
+Minimal Python plugin:
+
+```python
+"""
+* @title Python你好
+* @rule raw ^你好$
+* @version v1.0.0
+"""
+
+import asyncio
+from sillygirl import sender as s
+
+
+async def main():
+    await s.reply("你也好")
+
+
+asyncio.run(main())
+```
+
+Python inline clients:
+
+```python
+ql = QingLong({"id": 1})
+envs = await ql.getEnvs({"searchValue": "JD_COOKIE"})
+
+sc = SmallCat({"id": 1})
+code = await sc.getCode({"openid": "openid", "appid": "wx123"})
+
+dd = DaiDai({"id": 1})
+items = await dd.getEnvs({"keyword": "JD_COOKIE"})
+```
 
 ## Inline Clients
 
@@ -302,3 +392,4 @@ Before finishing a plugin:
 - External requests have timeouts or are wrapped in try/catch.
 - Config schema is registered at top level if configuration is needed.
 - Code is valid CommonJS and can run under NodeJS.
+- Python code uses Python 3.12 syntax and awaits all SillyGirl SDK calls.

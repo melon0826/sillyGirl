@@ -75,6 +75,8 @@ type pipxCommand struct {
 const defaultPnpmRegistry = "https://registry.npmmirror.com"
 const defaultPipxRegistry = "https://pypi.tuna.tsinghua.edu.cn/simple"
 const pythonPipxRuntimePackage = "sillygirl-python-runtime"
+const pythonGrpcRuntimeDependency = "grpcio==1.83.0"
+const pythonProtobufRuntimeDependency = "protobuf==7.35.1"
 
 var nodeSillygirlRuntimeDependencies = map[string]string{
 	"@grpc/grpc-js":   "^1.8.18",
@@ -83,8 +85,8 @@ var nodeSillygirlRuntimeDependencies = map[string]string{
 }
 
 var pythonPipxRuntimeDependencies = []string{
-	"grpcio",
-	"protobuf",
+	pythonGrpcRuntimeDependency,
+	pythonProtobufRuntimeDependency,
 }
 
 var nodePnpmOnlyBuiltDependencies = []string{
@@ -1599,7 +1601,7 @@ func ensurePipxRuntimeDependencies() error {
 	}
 	missing := []string{}
 	for _, name := range pythonPipxRuntimeDependencies {
-		if _, ok := installed[normalizePythonDependencyName(name)]; !ok {
+		if !pythonRuntimeDependencyInstalled(name, installed) {
 			missing = append(missing, name)
 		}
 	}
@@ -1609,6 +1611,27 @@ func ensurePipxRuntimeDependencies() error {
 	args := append([]string{"runpip", pythonPipxRuntimePackage, "install", "--upgrade", "--no-cache-dir"}, missing...)
 	_, err = runPipx(args, pipxInstallEnv())
 	return err
+}
+
+func pythonRuntimeDependencyInstalled(requirement string, installed map[string]string) bool {
+	name := normalizePythonDependencyName(requirement)
+	version, ok := installed[name]
+	if name == "" || !ok {
+		return false
+	}
+	if expected, ok := pythonDependencyExactVersion(requirement); ok {
+		return strings.TrimSpace(version) == expected
+	}
+	return true
+}
+
+func pythonDependencyExactVersion(requirement string) (string, bool) {
+	idx := strings.Index(requirement, "==")
+	if idx < 0 {
+		return "", false
+	}
+	version := strings.TrimSpace(strings.Split(requirement[idx+2:], ";")[0])
+	return version, version != ""
 }
 
 func ensurePipxRuntimePackage() (string, error) {

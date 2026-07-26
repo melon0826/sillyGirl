@@ -53,7 +53,7 @@ RUN apt-get update \
     && printf '[project]\nname = "sillygirl-python-runtime"\nversion = "1.0.0"\nrequires-python = ">=3.12"\n\n[project.scripts]\nsillygirl-python-runtime = "sillygirl_python_runtime:main"\n' > /tmp/sillygirl-python-runtime/pyproject.toml \
     && printf 'def main():\n    return 0\n' > /tmp/sillygirl-python-runtime/sillygirl_python_runtime/__init__.py \
     && PIPX_HOME=/data/plugins/python_packages PIPX_BIN_DIR=/data/plugins/python_packages/bin python3.12 -m pipx install --force --python python3.12 /tmp/sillygirl-python-runtime \
-    && PIPX_HOME=/data/plugins/python_packages PIPX_BIN_DIR=/data/plugins/python_packages/bin python3.12 -m pipx runpip sillygirl-python-runtime install --upgrade --no-cache-dir grpcio protobuf \
+    && PIPX_HOME=/data/plugins/python_packages PIPX_BIN_DIR=/data/plugins/python_packages/bin python3.12 -m pipx runpip sillygirl-python-runtime install --upgrade --no-cache-dir "grpcio==1.83.0" "protobuf==7.35.1" \
     && rm -rf /tmp/sillygirl-python-runtime \
     && ln -s /data/plugins /app/plugins \
     && ln -s /data/conf /app/conf
@@ -78,4 +78,4 @@ ENV TZ=Asia/Shanghai \
 EXPOSE 8080 50051
 VOLUME ["/data"]
 
-ENTRYPOINT ["sh", "-c", "mkdir -p /data/plugins /data/conf && rm -rf /data/language/node && rmdir /data/language 2>/dev/null || true; exec /app/sillyGirl \"$@\"", "--"]
+ENTRYPOINT ["sh", "-c", "mkdir -p /data/plugins /data/conf; exec /app/sillyGirl \"$@\"", "--"]

@@ -481,10 +481,6 @@ type githubTreeItem struct {
 	Type string `json:"type"`
 }
 
-type githubRepoResponse struct {
-	DefaultBranch string `json:"default_branch"`
-}
-
 type githubPublicFileIndexEntry struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -532,14 +528,6 @@ func parseGithubPluginSource(address string) (*githubPluginSource, error) {
 		source.Branch = "main"
 	}
 	return source, nil
-}
-
-func githubDefaultBranch(owner, repo string) string {
-	info := githubRepoResponse{}
-	if httpGetJSON(fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo), 10*time.Second, &info) != nil {
-		return ""
-	}
-	return info.DefaultBranch
 }
 
 func githubPluginTree(source *githubPluginSource) ([]githubTreeItem, error) {
@@ -894,14 +882,6 @@ func ensureChildPath(root, child string) error {
 	return nil
 }
 
-func httpGetString(address string, timeout time.Duration) (string, error) {
-	data, err := httpGetBytes(address, timeout)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
 func httpGetJSON(address string, timeout time.Duration, target interface{}) error {
 	data, err := httpGetBytes(address, timeout)
 	if err != nil {
@@ -979,11 +959,6 @@ func isSafeGithubRawURL(address string) bool {
 	}
 	ext := strings.ToLower(path.Ext(parsed.Path))
 	return isGithubURLHost(parsed.Host) && (ext == ".js" || ext == ".py")
-}
-
-func parseBoolText(value string) bool {
-	value = strings.TrimSpace(strings.ToLower(value))
-	return value == "true" || value == "1" || value == "yes" || value == "on"
 }
 
 func firstNonEmpty(values ...string) string {

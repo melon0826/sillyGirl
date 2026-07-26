@@ -91,6 +91,49 @@ async def main():
 asyncio.run(main())
 ```
 
+Python 插件要点：
+
+| 项目 | 说明 |
+|------|------|
+| 运行版本 | 只使用 Python 3.12；Docker 镜像已内置，本地运行需要安装 Python 3.12 |
+| 运行路径 | 推荐扁平文件 `/data/plugins/插件名.py`，不要再套 `插件名/main.py` |
+| SDK 引入 | 使用 `from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update` |
+| 异步调用 | Python SDK 方法都是异步方法，`s.reply()`、`Bucket.get()` 等都要 `await` |
+| 运行时依赖 | 内置 `grpcio==1.83.0`、`protobuf==7.35.1`，用于和 Go 主程序 gRPC 通信 |
+| 第三方依赖 | 在注释中写 `@depe ["requests"]`，后台「依赖管理」选择 Python 后可安装/卸载 |
+| 依赖位置 | Python 依赖由 pipx 管理，统一放在 `/data/plugins/python_packages` 下面供插件共享 |
+
+Python 使用存储和配置：
+
+```python
+"""
+* @title Python配置示例
+* @rule raw ^py配置$
+* @depe ["requests"]
+"""
+
+import asyncio
+from sillygirl import sender as s, Bucket, sillyGirlCreateSchema, SillyGirlPluginConfig
+
+schema = sillyGirlCreateSchema.object({
+    "token": sillyGirlCreateSchema.string()
+        .setTitle("Token")
+        .setFormat("password")
+        .setDefault(""),
+})
+config = SillyGirlPluginConfig(schema)
+db = Bucket("python-demo")
+
+
+async def main():
+    values = await config.get()
+    await db.set("last_user", await s.getUserId())
+    await s.reply("Token 是否已配置：" + ("是" if values.get("token") else "否"))
+
+
+asyncio.run(main())
+```
+
 元数据必填规则：
 
 | 使用场景 | 必填参数 | 说明 |
@@ -365,7 +408,7 @@ task.remove(ret.id);
 | 插件配置 | 支持 `sillyGirlCreateSchema` / `new SillyGirlPluginConfig(schema)` / `form(schema)` 声明式配置表单 |
 | 依赖管理 | 支持按 NodeJS/Python 筛选；NodeJS 使用 pnpm 管理共享依赖，Python 使用 pipx 管理共享依赖；依赖从插件注释 `@depe ["包名"]` 读取 |
 | NodeJS 运行 | `/data/plugins/插件名.js` 走 NodeJS 运行时，兼容旧版 `plugins/插件名/main.js` |
-| Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx 和 gRPC 依赖 |
+| Python 运行 | `/data/plugins/插件名.py` 走 Python 3.12 运行时，Docker 镜像已内置 Python、pipx、`grpcio==1.83.0` 和 `protobuf==7.35.1` |
 | 存储 | 支持 BoltDB 和 Redis，Admin 面板可切换存储桶查询 |
 | 搬运 | 可按平台和群号把消息交给指定插件脚本处理，业务过滤和转发由脚本自行实现 |
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
