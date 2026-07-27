@@ -75,12 +75,19 @@ func (sg *SillyGirlService) BucketWatch(stream srpc.SillyGirlService_BucketWatch
 
 // Get implements BucketServiceServer.Get.
 func (sg *SillyGirlService) BucketGet(ctx context.Context, req *srpc.BucketKeyRequest) (*srpc.Default, error) {
+	if isBackendVersionStorageKey(req.Name, req.Key) {
+		return &srpc.Default{}, nil
+	}
 	value := MakeBucket(req.Name).GetString(req.Key)
 	return &srpc.Default{Value: value}, nil
 }
 
 // Set implements BucketServiceServer.Set.
 func (sg *SillyGirlService) BucketSet(ctx context.Context, req *srpc.BucketSetRequest) (*srpc.BucketSetResponse, error) {
+	if isBackendVersionStorageKey(req.Name, req.Key) {
+		message := "版本信息由后端维护，不允许在存储中修改"
+		return &srpc.BucketSetResponse{Changed: false, Message: message}, errors.New(message)
+	}
 	message, changed, err := MakeBucket(req.Name).Set(req.Key, req.Value)
 	return &srpc.BucketSetResponse{Changed: changed, Message: message}, err
 }
@@ -94,18 +101,23 @@ func (sg *SillyGirlService) BucketDelete(ctx context.Context, req *srpc.BucketRe
 // Keys implements BucketServiceServer.Keys.
 func (sg *SillyGirlService) BucketKeys(ctx context.Context, req *srpc.BucketRequest) (*srpc.BucketKeysResponse, error) {
 	keys, err := MakeBucket(req.Name).Keys()
+	keys = filterBackendVersionStorageKeys(req.Name, keys)
 	return &srpc.BucketKeysResponse{Keys: keys}, err
 }
 
 // Len implements BucketServiceServer.Len.
 func (sg *SillyGirlService) BucketLen(ctx context.Context, req *srpc.BucketRequest) (*srpc.LenResponse, error) {
 	keys, err := MakeBucket(req.Name).Keys()
+	keys = filterBackendVersionStorageKeys(req.Name, keys)
 	return &srpc.LenResponse{Length: int32(len(keys))}, err
 }
 
 func (sg *SillyGirlService) BucketGetAll(ctx context.Context, req *srpc.BucketRequest) (*srpc.Default, error) {
 	var values = map[string]string{}
 	MakeBucket(req.Name).Foreach(func(b1, b2 []byte) error {
+		if isBackendVersionStorageKey(req.Name, string(b1)) {
+			return nil
+		}
 		values[string(b1)] = string(b2)
 		return nil
 	})

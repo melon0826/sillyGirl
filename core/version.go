@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	appVersion          = "0.1.8"
+	appVersion          = "0.1.9"
 	appRepository       = "https://github.com/smallfawn/sillyGirl"
 	remoteVersionRawURL = "https://raw.githubusercontent.com/smallfawn/sillyGirl/refs/heads/main/VERSION"
 )
@@ -27,6 +27,13 @@ var appVersionState = struct {
 }
 
 var appVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+([-.+][0-9A-Za-z.-]+)?$`)
+
+var backendVersionStorageKeys = map[string]bool{
+	"compiled_at":    true,
+	"latest_version": true,
+	"remote_version": true,
+	"version":        true,
+}
 
 func currentAppVersion() string {
 	version := normalizeAppVersion(compiledAppVersion())
@@ -44,9 +51,32 @@ func compiledAppVersion() string {
 	return version
 }
 
-func syncLocalAppVersionStorage() {
-	sillyGirl.Set2("compiled_at", compiledAppVersion())
-	sillyGirl.Set2("version", currentAppVersion())
+func cleanupBackendVersionStorageKeys() {
+	for key := range backendVersionStorageKeys {
+		_, _, _ = sillyGirl.Set2(key, "")
+	}
+}
+
+func isBackendVersionStorageKey(bucket string, key string) bool {
+	bucket = strings.TrimSpace(bucket)
+	key = strings.TrimSpace(key)
+	if bucket == "" || bucket == "silly" || bucket == "app" {
+		bucket = "sillyGirl"
+	}
+	return bucket == "sillyGirl" && backendVersionStorageKeys[key]
+}
+
+func filterBackendVersionStorageKeys(bucket string, keys []string) []string {
+	if len(keys) == 0 {
+		return keys
+	}
+	filtered := keys[:0]
+	for _, key := range keys {
+		if !isBackendVersionStorageKey(bucket, key) {
+			filtered = append(filtered, key)
+		}
+	}
+	return filtered
 }
 
 func latestAppVersion() (string, string) {
@@ -55,7 +85,7 @@ func latestAppVersion() (string, string) {
 	source := appVersionState.source
 	appVersionState.RUnlock()
 
-	latest = normalizeAppVersion(firstNonEmpty(latest, sillyGirl.GetString("remote_version"), sillyGirl.GetString("latest_version")))
+	latest = normalizeAppVersion(latest)
 	if latest == "" {
 		latest = currentAppVersion()
 	}
@@ -146,8 +176,6 @@ func rememberLatestAppVersion(latest string, source string) {
 	appVersionState.source = source
 	appVersionState.checkedAt = time.Now()
 	appVersionState.Unlock()
-	sillyGirl.Set("remote_version", latest)
-	sillyGirl.Set("latest_version", latest)
 }
 
 func versionAcceleratedURLs(address string) []string {

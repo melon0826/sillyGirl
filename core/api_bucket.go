@@ -59,6 +59,10 @@ func checkFilePlugin(key string, value *string) {
 	}
 }
 
+func shouldHideStorageKey(bucket string, key string) bool {
+	return key == storageBucketMarkerKey || isBackendVersionStorageKey(bucket, key)
+}
+
 func init() {
 	var sillyGirl = MakeBucket("sillyGirl")
 	GinApi(GET, "/api/admin/storage/list", RequireAuth, func(ctx *gin.Context) {
@@ -74,6 +78,9 @@ func init() {
 		for _, bk := range arr {
 			ar := strings.SplitN(bk, ".", 2)
 			if len(ar) == 2 {
+				if isBackendVersionStorageKey(ar[0], ar[1]) {
+					continue
+				}
 				if ar[0] == "plugins" && false { //todo
 					// data[bk] = halfDeEct(MakeBucket(ar[0]).GetString(ar[1]))
 				} else {
@@ -87,7 +94,7 @@ func init() {
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {
-					if string(b1) == storageBucketMarkerKey {
+					if shouldHideStorageKey(ar[0], string(b1)) {
 						return nil
 					}
 					data = append(data, map[string]string{
@@ -144,7 +151,7 @@ func init() {
 				b := MakeBucket(bucket)
 				b.Foreach(func(b1, b2 []byte) error {
 					key := string(b1)
-					if key == storageBucketMarkerKey {
+					if shouldHideStorageKey(bucket, key) {
 						return nil
 					}
 					value := string(b2)
@@ -172,6 +179,9 @@ func init() {
 		for _, bk := range arr {
 			ar := strings.SplitN(bk, ".", 2)
 			if len(ar) == 2 {
+				if isBackendVersionStorageKey(ar[0], ar[1]) {
+					continue
+				}
 				if ar[0] == "plugins" { //todo
 					value := MakeBucket(ar[0]).GetString(ar[1])
 					checkFilePlugin(ar[1], &value)
@@ -185,7 +195,7 @@ func init() {
 			}
 			if len(ar) == 1 {
 				MakeBucket(ar[0]).Foreach(func(b1, b2 []byte) error {
-					if string(b1) == storageBucketMarkerKey {
+					if shouldHideStorageKey(ar[0], string(b1)) {
 						return nil
 					}
 					data[bk+"."+string(b1)] = TransformBucketKeyValue(string(b2))
@@ -226,6 +236,11 @@ func init() {
 		for bk, v := range updates {
 			ar := strings.SplitN(bk, ".", 2)
 			if len(ar) == 2 {
+				if isBackendVersionStorageKey(ar[0], ar[1]) {
+					errors[bk] = "版本信息由后端维护，不允许在存储中修改"
+					changes[bk] = false
+					continue
+				}
 				bucket := MakeBucket(ar[0])
 				if ar[0] == "plugins" && fmt.Sprint(v) == "install" {
 					_, _, _ = SetBucketKeyValue2(bucket, ar[1], "")

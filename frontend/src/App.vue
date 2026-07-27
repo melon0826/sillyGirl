@@ -86,16 +86,32 @@ type PageKey =
   | 'plugins'
   | 'storage'
   | 'users'
-  | 'reply'
   | 'tasks'
-  | 'carry'
-  | 'qinglong'
-  | 'smallcat'
-  | 'daidai'
+  | 'message-tools'
+  | 'containers'
   | 'masters'
-  | 'messages'
   | 'plugin-configs'
   | 'settings';
+
+type ContainerKind = 'qinglong' | 'daidai' | 'smallcat';
+type MessageToolKind = 'carry' | 'reply' | 'messages';
+
+const validPages: PageKey[] = [
+  'welcome',
+  'scripts',
+  'dependencies',
+  'plugins',
+  'storage',
+  'users',
+  'tasks',
+  'message-tools',
+  'containers',
+  'masters',
+  'plugin-configs',
+  'settings',
+];
+const legacyContainerPages: ContainerKind[] = ['qinglong', 'daidai', 'smallcat'];
+const legacyMessageToolPages: MessageToolKind[] = ['carry', 'reply', 'messages'];
 
 const starter = `/**
  * @title 新脚本
@@ -110,6 +126,8 @@ s.reply("pong");
 const user = ref<CurrentUser | null>(null);
 const booting = ref(true);
 const page = ref<PageKey>(pageFromPath());
+const containerKind = ref<ContainerKind>(containerKindFromPath());
+const messageToolKind = ref<MessageToolKind>(messageToolKindFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
 const mobileMenuOpen = ref(false);
 const loginModel = reactive({ username: 'admin', password: '' });
@@ -165,8 +183,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.1.8',
-    remote: info.remote || info.local || '0.1.8',
+    local: info.local || '0.1.9',
+    remote: info.remote || info.local || '0.1.9',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -184,21 +202,34 @@ const menuItems = [
   { key: 'plugin-configs', label: '插件配置', icon: () => h(Boxes, { size: 16 }) },
   { key: 'storage', label: '存储', icon: () => h(Database, { size: 16 }) },
   { key: 'users', label: '用户管理', icon: () => h(User, { size: 16 }) },
-  { key: 'reply', label: '回复', icon: () => h(MessageSquare, { size: 16 }) },
+  { key: 'message-tools', label: '转发/回复/监听', icon: () => h(MessageSquare, { size: 16 }) },
   { key: 'tasks', label: '定时任务', icon: () => h(ClipboardList, { size: 16 }) },
-  { key: 'carry', label: '搬运', icon: () => h(Radio, { size: 16 }) },
-  { key: 'qinglong', label: '青龙容器', icon: () => h(Server, { size: 16 }) },
-  { key: 'smallcat', label: 'smallcat', icon: () => h(Server, { size: 16 }) },
-  { key: 'daidai', label: '呆呆面板', icon: () => h(Server, { size: 16 }) },
+  { key: 'containers', label: '容器管理', icon: () => h(Server, { size: 16 }) },
   { key: 'masters', label: '管理员', icon: () => h(ShieldCheck, { size: 16 }) },
-  { key: 'messages', label: '消息控制', icon: () => h(Boxes, { size: 16 }) },
   { key: 'settings', label: '基础设置', icon: () => h(Settings, { size: 16 }) },
 ];
 
 function pageFromPath(): PageKey {
   const path = window.location.pathname.replace(/^\/admin\/?/, '/');
   if (path.startsWith('/script/')) return 'scripts';
-  return ((path.split('/').filter(Boolean)[0] as PageKey) || 'welcome') as PageKey;
+  const key = path.split('/').filter(Boolean)[0] || 'welcome';
+  if (legacyContainerPages.includes(key as ContainerKind)) return 'containers';
+  if (legacyMessageToolPages.includes(key as MessageToolKind)) return 'message-tools';
+  return validPages.includes(key as PageKey) ? (key as PageKey) : 'welcome';
+}
+
+function containerKindFromPath(): ContainerKind {
+  const path = window.location.pathname.replace(/^\/admin\/?/, '/');
+  const parts = path.split('/').filter(Boolean);
+  const key = parts[0] === 'containers' ? parts[1] : parts[0];
+  return legacyContainerPages.includes(key as ContainerKind) ? (key as ContainerKind) : 'qinglong';
+}
+
+function messageToolKindFromPath(): MessageToolKind {
+  const path = window.location.pathname.replace(/^\/admin\/?/, '/');
+  const parts = path.split('/').filter(Boolean);
+  const key = parts[0] === 'message-tools' ? parts[1] : parts[0];
+  return legacyMessageToolPages.includes(key as MessageToolKind) ? (key as MessageToolKind) : 'carry';
 }
 
 function scriptIdFromPath() {
@@ -213,7 +244,7 @@ function maskSecret(value?: string) {
 }
 
 function navigate(next: PageKey, path?: string) {
-  const url = path || `/admin/${next === 'welcome' ? '' : next}`;
+  const url = path || (next === 'welcome' ? '/admin/' : next === 'containers' ? `/admin/containers/${containerKind.value}` : next === 'message-tools' ? `/admin/message-tools/${messageToolKind.value}` : `/admin/${next}`);
   window.history.pushState({}, '', url);
   page.value = next;
   selectedScriptId.value = scriptIdFromPath();
@@ -323,6 +354,8 @@ onMounted(() => {
   bootApp();
   window.addEventListener('popstate', () => {
     page.value = pageFromPath();
+    containerKind.value = containerKindFromPath();
+    messageToolKind.value = messageToolKindFromPath();
     selectedScriptId.value = scriptIdFromPath();
   });
 });
@@ -1042,6 +1075,40 @@ async function removeDaidaiPanel(row: DaidaiPanel) {
   loadDaidaiPanels();
 }
 
+const containerOptions = [
+  { label: '青龙', value: 'qinglong' },
+  { label: '呆呆', value: 'daidai' },
+  { label: 'smallcat', value: 'smallcat' },
+] as { label: string; value: ContainerKind }[];
+const containerHelpText = computed(() => {
+  if (containerKind.value === 'qinglong') return '保存前会检测 /open/auth/token 是否可用。';
+  if (containerKind.value === 'daidai') return '保存前会调用 /api/open-api/token，使用 app_key/app_secret 验证 Open API。';
+  return '保存前会调用 /api/auth/validate，使用页面 API AUTH 一致的 auth 请求头验证。';
+});
+const containerAddLabel = computed(() => {
+  if (containerKind.value === 'qinglong') return '添加青龙面板';
+  if (containerKind.value === 'daidai') return '添加呆呆面板';
+  return '添加 smallcat';
+});
+
+function loadActiveContainerPanels() {
+  if (containerKind.value === 'qinglong') return loadQinglongPanels();
+  if (containerKind.value === 'daidai') return loadDaidaiPanels();
+  return loadSmallcatPanels();
+}
+
+function openActiveContainerPanel() {
+  if (containerKind.value === 'qinglong') {
+    openQinglongPanel();
+    return;
+  }
+  if (containerKind.value === 'daidai') {
+    openDaidaiPanel();
+    return;
+  }
+  openSmallcatPanel();
+}
+
 const plugins = reactive({
   rows: [] as PluginInfo[],
   total: 0,
@@ -1537,16 +1604,47 @@ async function removeMessageRow(row: any) {
   loadMessages();
 }
 
+const messageToolOptions = [
+  { label: '转发', value: 'carry' },
+  { label: '回复', value: 'reply' },
+  { label: '监听', value: 'messages' },
+] as { label: string; value: MessageToolKind }[];
+const messageToolHelpText = computed(() => {
+  if (messageToolKind.value === 'carry') return '选择平台、群号、工作机器人和处理脚本。';
+  if (messageToolKind.value === 'reply') return '按关键词或正则维护自动回复规则。';
+  return '维护监听群组、禁言群组和屏蔽用户。';
+});
+const messageToolAddLabel = computed(() => {
+  if (messageToolKind.value === 'carry') return '新增转发群组';
+  if (messageToolKind.value === 'reply') return '新增回复';
+  return '新增监听规则';
+});
+
+function loadActiveMessageTool() {
+  if (messageToolKind.value === 'carry') return loadCarry();
+  if (messageToolKind.value === 'reply') return loadReplies();
+  return loadMessages();
+}
+
+function openActiveMessageTool() {
+  if (messageToolKind.value === 'carry') {
+    openCarry();
+    return;
+  }
+  if (messageToolKind.value === 'reply') {
+    openReply();
+    return;
+  }
+  openMessage();
+}
+
 watch([page, user], ([p]) => {
   if (!user.value) return;
-  if (p === 'reply') loadReplies();
   if (p === 'users') loadNormalUsers();
   if (p === 'masters') loadMasters();
   if (p === 'tasks') loadTasks();
-  if (p === 'carry') loadCarry();
-  if (p === 'qinglong') loadQinglongPanels();
-  if (p === 'smallcat') loadSmallcatPanels();
-  if (p === 'daidai') loadDaidaiPanels();
+  if (p === 'message-tools') loadActiveMessageTool();
+  if (p === 'containers') loadActiveContainerPanels();
   if (p === 'dependencies') loadNodeDependencies();
   if (p === 'plugins') {
     loadPluginSources();
@@ -1558,8 +1656,17 @@ watch([page, user], ([p]) => {
     loadStorage();
   }
   if (p === 'settings') loadSettings();
-  if (p === 'messages') loadMessages();
 }, { immediate: true });
+watch(containerKind, (kind) => {
+  if (page.value !== 'containers') return;
+  window.history.replaceState({}, '', `/admin/containers/${kind}`);
+  loadActiveContainerPanels();
+});
+watch(messageToolKind, (kind) => {
+  if (page.value !== 'message-tools') return;
+  window.history.replaceState({}, '', `/admin/message-tools/${kind}`);
+  loadActiveMessageTool();
+});
 watch(() => plugins.tab, () => loadPlugins());
 watch(() => plugins.klass, () => loadPlugins());
 watch(() => nodeDeps.plugin, (plugin) => {
@@ -1570,7 +1677,9 @@ watch(() => nodeDeps.runtime, () => {
   nodeDeps.packageName = '';
   if (page.value === 'dependencies') loadNodeDependencies('');
 });
-watch(() => msgState.active, () => loadMessages());
+watch(() => msgState.active, () => {
+  if (page.value === 'message-tools' && messageToolKind.value === 'messages') loadMessages();
+});
 
 function optionMap(values?: string[]) {
   return (values || []).map((value) => ({ value, label: value }));
@@ -1963,12 +2072,25 @@ function smallcatOpenids(record?: AdminUserRow) {
               </Table>
             </section>
 
-            <section v-if="page === 'reply'" class="panel">
-              <div class="toolbar-left" style="margin-bottom: 12px">
-                <Button type="primary" @click="openReply()"><template #icon><Plus :size="16" /></template>新增回复</Button>
-                <Button @click="loadReplies()"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+            <section v-if="page === 'message-tools'" class="panel">
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <Segmented v-model:value="messageToolKind" :options="messageToolOptions" />
+                  <Button type="primary" @click="openActiveMessageTool()"><template #icon><Plus :size="16" /></template>{{ messageToolAddLabel }}</Button>
+                  <Button @click="loadActiveMessageTool"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                </div>
+                <Typography.Text class="muted">{{ messageToolHelpText }}</Typography.Text>
               </div>
-              <Table :row-key="(row:any) => String(row.id)" :data-source="replies.rows" :pagination="{ total: replies.total, pageSize: 20, onChange: loadReplies }">
+
+              <Table v-if="messageToolKind === 'carry'" row-key="chat_id" :data-source="carry.rows" :pagination="{ total: carry.total, pageSize: 20, onChange: loadCarry }">
+                <Table.Column title="#" data-index="id" :width="64" />
+                <Table.Column title="平台" data-index="platform" :width="100" />
+                <Table.Column title="群号" data-index="chat_id" :width="160" />
+                <Table.Column title="备注" data-index="remark" />
+                <Table.Column title="操作" :width="150"><template #default="{ record }"><Button type="text" @click="openCarry(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeCarry(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
+              </Table>
+
+              <Table v-else-if="messageToolKind === 'reply'" :row-key="(row:any) => String(row.id)" :data-source="replies.rows" :pagination="{ total: replies.total, pageSize: 20, onChange: loadReplies }">
                 <Table.Column title="#" data-index="index" :width="64" />
                 <Table.Column title="关键词" data-index="keyword" :width="220" />
                 <Table.Column title="回复内容" data-index="value" ellipsis />
@@ -1984,6 +2106,17 @@ function smallcatOpenids(record?: AdminUserRow) {
                   </template>
                 </Table.Column>
               </Table>
+
+              <template v-else>
+                <Tabs v-model:active-key="msgState.active" :items="Object.entries(messageBuckets).map(([key, item]) => ({ key, label: item.label }))" />
+                <Table row-key="key" :data-source="msgState.rows">
+                  <Table.Column title="号码" data-index="key" :width="220" />
+                  <Table.Column title="平台" data-index="platform" :width="140" />
+                  <Table.Column title="说明" data-index="desc" />
+                  <Table.Column title="启用" data-index="enable" :width="90"><template #default="{ text }">{{ text ? '是' : '否' }}</template></Table.Column>
+                  <Table.Column title="操作" :width="150"><template #default="{ record }"><Button type="text" @click="openMessage(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeMessageRow(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
+                </Table>
+              </template>
             </section>
 
             <section v-if="page === 'masters'" class="panel">
@@ -2017,29 +2150,17 @@ function smallcatOpenids(record?: AdminUserRow) {
               </Table>
             </section>
 
-            <section v-if="page === 'carry'" class="panel">
-              <div class="toolbar-left" style="margin-bottom: 12px">
-                <Button type="primary" @click="openCarry()"><template #icon><Plus :size="16" /></template>新增群组</Button>
-                <Button @click="loadCarry()"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-              </div>
-              <Table row-key="chat_id" :data-source="carry.rows" :pagination="{ total: carry.total, pageSize: 20, onChange: loadCarry }">
-                <Table.Column title="#" data-index="id" :width="64" />
-                <Table.Column title="平台" data-index="platform" :width="100" />
-                <Table.Column title="群号" data-index="chat_id" :width="160" />
-                <Table.Column title="备注" data-index="remark" />
-                <Table.Column title="操作" :width="150"><template #default="{ record }"><Button type="text" @click="openCarry(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeCarry(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
-              </Table>
-            </section>
-
-            <section v-if="page === 'qinglong'" class="panel">
+            <section v-if="page === 'containers'" class="panel">
               <div class="toolbar">
                 <div class="toolbar-left">
-                  <Button type="primary" @click="openQinglongPanel()"><template #icon><Plus :size="16" /></template>添加青龙面板</Button>
-                  <Button @click="loadQinglongPanels"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                  <Segmented v-model:value="containerKind" :options="containerOptions" />
+                  <Button type="primary" @click="openActiveContainerPanel()"><template #icon><Plus :size="16" /></template>{{ containerAddLabel }}</Button>
+                  <Button @click="loadActiveContainerPanels"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 </div>
-                <Typography.Text class="muted">保存前会检测 /open/auth/token 是否可用。</Typography.Text>
+                <Typography.Text class="muted">{{ containerHelpText }}</Typography.Text>
               </div>
-              <Table row-key="id" :loading="qinglong.loading" :data-source="qinglong.rows" :pagination="{ total: qinglong.total, pageSize: 20 }">
+
+              <Table v-if="containerKind === 'qinglong'" row-key="id" :loading="qinglong.loading" :data-source="qinglong.rows" :pagination="{ total: qinglong.total, pageSize: 20 }">
                 <Table.Column title="#" :width="72">
                   <template #default="{ index }">{{ index + 1 }}</template>
                 </Table.Column>
@@ -2068,17 +2189,38 @@ function smallcatOpenids(record?: AdminUserRow) {
                   </template>
                 </Table.Column>
               </Table>
-            </section>
 
-            <section v-if="page === 'smallcat'" class="panel">
-              <div class="toolbar">
-                <div class="toolbar-left">
-                  <Button type="primary" @click="openSmallcatPanel()"><template #icon><Plus :size="16" /></template>添加 smallcat</Button>
-                  <Button @click="loadSmallcatPanels"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                </div>
-                <Typography.Text class="muted">保存前会调用 /api/auth/validate，使用页面 API AUTH 一致的 auth 请求头验证。</Typography.Text>
-              </div>
-              <Table row-key="id" :loading="smallcat.loading" :data-source="smallcat.rows" :pagination="{ total: smallcat.total, pageSize: 20 }">
+              <Table v-else-if="containerKind === 'daidai'" row-key="id" :loading="daidai.loading" :data-source="daidai.rows" :pagination="{ total: daidai.total, pageSize: 20 }">
+                <Table.Column title="#" :width="72">
+                  <template #default="{ index }">{{ index + 1 }}</template>
+                </Table.Column>
+                <Table.Column title="名称" data-index="name" :width="180">
+                  <template #default="{ record }">
+                    <Typography.Text strong>{{ record.name || record.address }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="地址" data-index="address" ellipsis />
+                <Table.Column title="App Key" data-index="app_key" :width="220" ellipsis />
+                <Table.Column title="状态" data-index="status" :width="120">
+                  <template #default="{ record }">
+                    <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '在线' : '未检测' }}</Tag>
+                  </template>
+                </Table.Column>
+                <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
+                  <template #default="{ text }">{{ timestamp(text) }}</template>
+                </Table.Column>
+                <Table.Column title="操作" :width="210">
+                  <template #default="{ record }">
+                    <Button type="text" @click="testDaidaiPanel(record)">检测</Button>
+                    <Button type="text" @click="openDaidaiPanel(record)">编辑</Button>
+                    <Popconfirm title="确认删除这个呆呆面板？" @confirm="removeDaidaiPanel(record)">
+                      <Button type="text" danger><Trash2 :size="16" /></Button>
+                    </Popconfirm>
+                  </template>
+                </Table.Column>
+              </Table>
+
+              <Table v-else row-key="id" :loading="smallcat.loading" :data-source="smallcat.rows" :pagination="{ total: smallcat.total, pageSize: 20 }">
                 <Table.Column title="#" :width="72">
                   <template #default="{ index }">{{ index + 1 }}</template>
                 </Table.Column>
@@ -2121,45 +2263,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                     <Button type="text" @click="testSmallcatPanel(record)">检测</Button>
                     <Button type="text" @click="openSmallcatPanel(record)">编辑</Button>
                     <Popconfirm title="确认删除这个 smallcat？" @confirm="removeSmallcatPanel(record)">
-                      <Button type="text" danger><Trash2 :size="16" /></Button>
-                    </Popconfirm>
-                  </template>
-                </Table.Column>
-              </Table>
-            </section>
-
-            <section v-if="page === 'daidai'" class="panel">
-              <div class="toolbar">
-                <div class="toolbar-left">
-                  <Button type="primary" @click="openDaidaiPanel()"><template #icon><Plus :size="16" /></template>添加呆呆面板</Button>
-                  <Button @click="loadDaidaiPanels"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                </div>
-                <Typography.Text class="muted">保存前会调用 /api/open-api/token，使用 app_key/app_secret 验证 Open API。</Typography.Text>
-              </div>
-              <Table row-key="id" :loading="daidai.loading" :data-source="daidai.rows" :pagination="{ total: daidai.total, pageSize: 20 }">
-                <Table.Column title="#" :width="72">
-                  <template #default="{ index }">{{ index + 1 }}</template>
-                </Table.Column>
-                <Table.Column title="名称" data-index="name" :width="180">
-                  <template #default="{ record }">
-                    <Typography.Text strong>{{ record.name || record.address }}</Typography.Text>
-                  </template>
-                </Table.Column>
-                <Table.Column title="地址" data-index="address" ellipsis />
-                <Table.Column title="App Key" data-index="app_key" :width="220" ellipsis />
-                <Table.Column title="状态" data-index="status" :width="120">
-                  <template #default="{ record }">
-                    <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '在线' : '未检测' }}</Tag>
-                  </template>
-                </Table.Column>
-                <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
-                  <template #default="{ text }">{{ timestamp(text) }}</template>
-                </Table.Column>
-                <Table.Column title="操作" :width="210">
-                  <template #default="{ record }">
-                    <Button type="text" @click="testDaidaiPanel(record)">检测</Button>
-                    <Button type="text" @click="openDaidaiPanel(record)">编辑</Button>
-                    <Popconfirm title="确认删除这个呆呆面板？" @confirm="removeDaidaiPanel(record)">
                       <Button type="text" danger><Trash2 :size="16" /></Button>
                     </Popconfirm>
                   </template>
@@ -2326,20 +2429,6 @@ function smallcatOpenids(record?: AdminUserRow) {
               </Form>
             </section>
 
-            <section v-if="page === 'messages'" class="panel">
-              <Tabs v-model:active-key="msgState.active" :items="Object.entries(messageBuckets).map(([key, item]) => ({ key, label: item.label }))" />
-              <div class="toolbar-left" style="margin-bottom: 12px">
-                <Button type="primary" @click="openMessage()"><template #icon><Plus :size="16" /></template>新增</Button>
-                <Button @click="loadMessages"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-              </div>
-              <Table row-key="key" :data-source="msgState.rows">
-                <Table.Column title="号码" data-index="key" :width="220" />
-                <Table.Column title="平台" data-index="platform" :width="140" />
-                <Table.Column title="说明" data-index="desc" />
-                <Table.Column title="启用" data-index="enable" :width="90"><template #default="{ text }">{{ text ? '是' : '否' }}</template></Table.Column>
-                <Table.Column title="操作" :width="150"><template #default="{ record }"><Button type="text" @click="openMessage(record)">编辑</Button><Popconfirm title="确认删除？" @confirm="removeMessageRow(record)"><Button type="text" danger><Trash2 :size="16" /></Button></Popconfirm></template></Table.Column>
-              </Table>
-            </section>
           </main>
         </Layout>
 
