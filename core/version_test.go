@@ -20,8 +20,8 @@ func TestCompiledAndCurrentAppVersion(t *testing.T) {
 	if got := compiledAppVersion(); got != "dev-abcdef0" {
 		t.Fatalf("compiledAppVersion() = %q, want %q", got, "dev-abcdef0")
 	}
-	if got := currentAppVersion(); got != "dev-abcdef0" {
-		t.Fatalf("currentAppVersion() = %q, want %q", got, "dev-abcdef0")
+	if got := currentAppVersion(); got != appVersion {
+		t.Fatalf("currentAppVersion() = %q, want %q", got, appVersion)
 	}
 }
 

@@ -288,6 +288,7 @@ func overviewAdapterStatuses() []map[string]interface{} {
 		Platform string
 		Label    string
 	}{
+		{Platform: "clawbot", Label: "微信 ClawBot"},
 		{Platform: "pagermaid", Label: "Pagermaid"},
 		{Platform: "qq", Label: "QQ"},
 		{Platform: "web", Label: "Web"},
@@ -297,11 +298,13 @@ func overviewAdapterStatuses() []map[string]interface{} {
 	for _, item := range platforms {
 		botsID := GetAdapterBotsID(item.Platform)
 		rows = append(rows, map[string]interface{}{
-			"platform": item.Platform,
-			"label":    item.Label,
-			"online":   len(botsID) > 0,
-			"bots_id":  botsID,
-			"count":    len(botsID),
+			"platform":   item.Platform,
+			"label":      item.Label,
+			"online":     len(botsID) > 0,
+			"enabled":    AdapterConfigEnabled(item.Platform),
+			"manageable": AdapterConfigManageable(item.Platform),
+			"bots_id":    botsID,
+			"count":      len(botsID),
 		})
 	}
 	return rows

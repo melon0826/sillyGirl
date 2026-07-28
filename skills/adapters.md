@@ -18,6 +18,7 @@ Core files:
 - `core/function.go`: message filtering, rule matching, plugin dispatch.
 - `adapters/qq/main.go`: OneBot reverse WebSocket adapter.
 - `adapters/telegram/main.go`: Telegram Bot API long-polling adapter.
+- `adapters/clawbot/main.go`: Weixin ClawBot iLink long-polling adapter.
 - `adapters/web/main.go`: browser long-polling web adapter.
 
 An adapter should:
@@ -224,6 +225,21 @@ Telegram adapter uses Bot API long polling:
 
 Do not use `drop_pending_updates` unless the user explicitly asks. Do not keep compatibility aliases for old token keys unless requested.
 
+## Weixin ClawBot Pattern
+
+ClawBot adapter uses Tencent OpenClaw Weixin iLink HTTP APIs:
+
+- Read `clawbot.token`.
+- Read `clawbot.api_base`, default `https://ilinkai.weixin.qq.com`.
+- Admin QR login uses `GET /ilink/bot/get_bot_qrcode?bot_type=3`, then long-polls `GET /ilink/bot/get_qrcode_status?qrcode=...`; the frontend renders the returned QR URL as an image, and on `confirmed`, save `bot_token` to `clawbot.token`.
+- Register as `adapter.Init("clawbot", "default", nil)` after valid config is present.
+- Long-poll `POST /ilink/bot/getupdates` with `{ get_updates_buf, base_info }`.
+- Cache response `get_updates_buf` in memory and pass it to the next poll.
+- Send replies with `POST /ilink/bot/sendmessage`.
+- Include `AuthorizationType: ilink_bot_token`, `Authorization: Bearer <token>`, `X-WECHAT-UIN`, `iLink-App-Id`, and `iLink-App-ClientVersion` headers.
+- Only promise contextual replies: `sendmessage` requires `to_user_id` and the inbound `context_token`.
+- Keep inbound processing text-first unless media upload/decryption is implemented end to end.
+
 ## Web Adapter Pattern
 
 Web adapter uses `/api/web_chat` long polling:
@@ -236,12 +252,15 @@ Web adapter uses `/api/web_chat` long polling:
 
 ## Pagermaid Bridge
 
-Pagermaid support is a bridge, not a native adapter in this repo:
+Pagermaid uses a Go WebSocket adapter in this repo, with a small Pagermaid-side Python bridge:
 
-- The bridge script is `adapters/pagermaid/sillyplus.py`.
-- It should forward messages to SillyGirl through a clearly authenticated endpoint or websocket.
-- SillyGirl-side support must exist before promising Pagermaid is online.
-- Document the required endpoint, token, and expected message JSON shape when changing Pagermaid behavior.
+- Go adapter: `adapters/pagermaid/main.go`.
+- Pagermaid bridge script: `adapters/pagermaid/sillyplus.py`.
+- Endpoint: `GET /pagermaid/receive`.
+- Token bucket key: `pagermaid.token`, accepted as `?token=` or `Authorization: Bearer ...`.
+- Bot id comes from `?user_id=`, `X-Self-ID`, or a fallback connection id.
+- The bridge should forward legitimate incoming Pagermaid messages without group/plugin filtering; SillyGirl core handles listen groups, blocked users, admin commands, and plugin rules.
+- Outbound actions are sent from Go to the bridge as `{ action, data, echo }`; echo responses should include the same `echo` and a message id when available.
 
 ## Status Visibility
 

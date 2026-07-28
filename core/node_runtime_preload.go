@@ -166,6 +166,12 @@ const nodeRuntimePreloadScript = `
       sg = globalThis.sillygirl || {};
     }
   }
+  const Module = require("module");
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === "sillygirl") return sg;
+    return originalLoad.apply(this, arguments);
+  };
   const Bucket = sg && sg.Bucket;
   if (!Bucket) return;
 

@@ -23,6 +23,8 @@ export type AdapterStatus = {
   platform: string;
   label: string;
   online: boolean;
+  enabled?: boolean;
+  manageable?: boolean;
   bots_id?: string[];
   count?: number;
 };

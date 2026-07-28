@@ -67,6 +67,7 @@ Supported metadata:
 | `@author 作者` | Optional | Plugin author. |
 | `@version v1.0.0` | Optional | Plugin version. |
 | `@desc 说明` | Optional | Plugin description. Use `@desc`, not `@description`. |
+| `@icon URL` | Optional | Plugin icon URL. If omitted, SillyGirl uses the default apple icon. |
 | `@rule 规则` | Required for message plugins | Message trigger. Can appear multiple times. |
 | `@admin true/false` | Optional | Whether only admins can trigger it. |
 | `@priority 数字` | Optional | Match priority; lower/higher behavior follows project parser. |

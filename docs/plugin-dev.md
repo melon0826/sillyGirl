@@ -312,7 +312,7 @@ if (content === "你好") {
 | `author` | string | 否 | 作者名 |
 | `desc` | string | 否 | 插件描述 |
 | `depe` | JSON array | 否 | 插件依赖声明，例如 `@depe ["ipp"]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
-| `icon` | string | 否 | 插件图标 URL |
+| `icon` | string | 否 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `public` | boolean | 否 | `true` 时允许发布到插件市场 |
 | `disable` | boolean | 否 | `true` 时禁用插件 |
 | `admin` | boolean | 否 | `true` 时仅管理员可触发 |

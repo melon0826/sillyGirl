@@ -24,9 +24,9 @@
 mkdir -p /opt/sillygirl && cd /opt/sillygirl
 
 # 下载正式版本（以 Linux amd64 为例）
-wget https://github.com/smallfawn/sillyGirl/releases/download/V0.2.0/sillyGirl_V0.2.0_linux_amd64.tar.gz
-tar -xzf sillyGirl_V0.2.0_linux_amd64.tar.gz
-mv sillyGirl_V0.2.0_linux_amd64 sillyGirl
+wget https://github.com/smallfawn/sillyGirl/releases/download/V0.2.1/sillyGirl_V0.2.1_linux_amd64.tar.gz
+tar -xzf sillyGirl_V0.2.1_linux_amd64.tar.gz
+mv sillyGirl_V0.2.1_linux_amd64 sillyGirl
 chmod +x sillyGirl
 
 # 测试运行

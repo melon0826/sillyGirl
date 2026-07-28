@@ -119,6 +119,16 @@ func (qq *QQ) WriteJSON(ca CallApi) (string, error) {
 
 var debug = qq.GetBool("debug", false)
 var qqNewlinePattern = regexp.MustCompile(`[\n\r]+`)
+var qqConnections sync.Map
+
+func closeQQConnections() {
+	qqConnections.Range(func(_, value interface{}) bool {
+		if qqcon, ok := value.(*QQ); ok && qqcon.conn != nil {
+			_ = qqcon.conn.Close()
+		}
+		return true
+	})
+}
 
 func validOneBotAuthorization(auth string, token string) bool {
 	token = strings.TrimSpace(token)
@@ -154,6 +164,13 @@ func validOneBotOrigin(r *http.Request) bool {
 }
 
 func init() {
+	storage.Watch(qq, "enable", func(old, new, key string) *storage.Final {
+		if strings.EqualFold(strings.TrimSpace(new), "false") || strings.TrimSpace(new) == "0" {
+			closeQQConnections()
+			core.DestroyAdaptersByPlatform("qq")
+		}
+		return nil
+	})
 	storage.Watch(qq, "debug", func(old, new, key string) *storage.Final {
 		now := ""
 		if new == "true" {
@@ -169,6 +186,11 @@ func init() {
 	})
 	go func() {
 		core.GinApi(core.GET, "/qq/receive", func(c *gin.Context) {
+			if !core.AdapterConfigEnabled("qq") {
+				core.Logs.Warn("OneBot机器人未启动：qq.enable=false")
+				c.AbortWithStatus(403)
+				return
+			}
 			auth := c.GetHeader("Authorization")
 			token := qq.GetString("token")
 			if !validOneBotAuthorization(auth, token) {
@@ -192,6 +214,12 @@ func init() {
 				conn:  ws,
 				chans: make(map[string]chan string),
 			}
+			connectionKey := botID
+			if connectionKey == "" {
+				connectionKey = fmt.Sprintf("%s-%d", c.ClientIP(), time.Now().UnixNano())
+			}
+			qqConnections.Store(connectionKey, qqcon)
+			defer qqConnections.Delete(connectionKey)
 			adapter := &core.Factory{}
 			adapter.Init("qq", botID, nil)
 			defer adapter.Destroy()

@@ -1,6 +1,8 @@
 import contextlib
 import json
 import io
+import os
+import urllib.parse
 
 from asyncio import sleep
 
@@ -11,14 +13,24 @@ from pagermaid.enums import Message
 from pagermaid.services import bot
 from pagermaid.single_utils import sqlite
 from pagermaid.utils import pip_install
-from pyrogram.enums.chat_type import ChatType
 
 
 pip_install("aiohttp")
 
 import aiohttp
 
-uri = "${rws()}"
+uri = os.getenv("SILLYGIRL_PAGERMAID_WS", "${rws()}").strip()
+
+
+def with_user_id(value: str, user_id: str) -> str:
+    if not value:
+        return value
+    parsed = urllib.parse.urlsplit(value)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query = [(key, val) for key, val in query if key != "user_id"]
+    query.append(("user_id", str(user_id)))
+    return urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
+
 
 class WebSocket:
     def __init__(self):
@@ -50,7 +62,7 @@ class WebSocket:
             await self.disconnect()
         if self.uri:
             self.ws = self.client.ws_connect(
-                self.uri + "&user_id=" + str(bot.me.id),
+                with_user_id(self.uri, bot.me.id),
                 autoclose=False,
                 autoping=False,
                 timeout=5,
@@ -112,20 +124,27 @@ class WebSocket:
             data = json.loads(text)
         except Exception:
             return
-        if data['action'] == "set_whitelist":
-            ws.whitelist = data['data']
+        action = data.get("action")
+        if not action:
+            return
+        if action == "set_whitelist":
+            ws.whitelist = data.get("data") or []
             return
         echo = data.get("echo", "")
-        action = data.get("action", None)
-        action_data = data.get("data", None)
-        bot_action = getattr(bot, action)
+        action_data = data.get("data") or {}
+        bot_action = getattr(bot, action, None)
+        if not bot_action:
+            return
         if action == "send_document":
             action_data['document'] = io.BytesIO(str.encode(action_data['document']))
 
-        if bot_action and action_data:
+        if bot_action and isinstance(action_data, dict):
             message = await bot_action(**action_data)
             message = str(message.__str__())
-            message = message.replace("{", '{"echo": "' + str(echo) + '",', 1)
+            if message.strip().startswith("{"):
+                message = message.replace("{", '{"echo": "' + str(echo) + '",', 1)
+            else:
+                message = json.dumps({"echo": str(echo), "message": message}, ensure_ascii=False)
             await ws.push(message)
 
 
@@ -144,21 +163,6 @@ async def connect_ws():
 @listener(incoming=True, outgoing=False, ignore_edited=True)
 async def websocket_push(message: Message):
     with contextlib.suppress(Exception):
-        if message.chat and message.chat.type in [
-            ChatType.GROUP,
-            ChatType.SUPERGROUP,
-            ChatType.CHANNEL,
-        ]:
-            if not ws.whitelist or ((message.chat and str(message.chat.id) not in ws.whitelist) and (message.from_user and str(message.from_user.id) not in ws.whitelist)):
-                if message.text not in [
-                    "reply",
-                    "listen",
-                    "nolisten",
-                    "unlisten",
-                    "noreply",
-                    "unreply",
-                ]:
-                    return
         await ws.push(message.__str__())
 
 

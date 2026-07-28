@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/smallfawn/sillyGirl/adapters/clawbot"
+	_ "github.com/smallfawn/sillyGirl/adapters/pagermaid"
 	_ "github.com/smallfawn/sillyGirl/adapters/qq"
 	_ "github.com/smallfawn/sillyGirl/adapters/telegram"
 	"github.com/smallfawn/sillyGirl/adapters/web"

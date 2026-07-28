@@ -157,7 +157,7 @@ asyncio.run(main())
 | `@author 作者` | 非必填 | 作者名 |
 | `@desc 描述` | 非必填 | 插件说明，显示在后台或插件市场 |
 | `@depe ["依赖名"]` | 非必填 | 插件依赖声明；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
-| `@icon URL` | 非必填 | 插件图标 URL |
+| `@icon URL` | 非必填 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `@public true/false` | 非必填 | 是否允许公开到插件市场，默认 `false` |
 | `@origin 来源` | 非必填 | 插件来源标记，默认 `自定义` |
 | `@class 标签` | 非必填 | 插件分类标签，可写多个 |
@@ -453,7 +453,7 @@ task.remove(ret.id);
 | 青龙容器 | 可添加多个青龙面板，并在脚本中通过 `new QingLong({ id })` 调用 |
 | smallcat | 可添加多个 smallcat 面板，并在脚本中通过 `new SmallCat({ id })` 调用 |
 | 呆呆面板 | 可添加多个呆呆面板，并在脚本中通过 `new DaiDai({ id })` 调用 |
-| 适配器 | 内置 QQ、Telegram Bot、Web 适配器，并提供 Pagermaid 桥接脚本 |
+| 适配器 | 内置微信 ClawBot、QQ、Telegram Bot、Web、Pagermaid 适配器；Pagermaid 端只需放置轻量桥接脚本 |
 | 定时任务 | 支持 Cron 表达式、`node 插件名.js` 和 `python 插件名.py` 脚本触发 |
 | Docker 发布 | GitHub Actions 打包 Releases，并推送 Docker Hub 镜像 |
 
@@ -466,6 +466,25 @@ task.remove(ret.id);
 ## 接入适配器
 
 适配器配置都可以在 Admin 面板「存储」里添加或修改。选择对应存储桶后新增键值，保存后相关适配器会自动重载；也可以重启程序确认连接状态。
+
+### 微信 ClawBot
+
+ClawBot 接入使用腾讯 OpenClaw 微信通道同款 iLink HTTP API：`ilink/bot/getupdates` 长轮询收消息，`ilink/bot/sendmessage` 发送回复。当前实现聚焦文本私聊对话：用户给 ClawBot 发消息后，SillyGirl 匹配脚本规则并用同一条消息的 `context_token` 回复。
+
+SillyGirl 侧配置：
+
+| 存储桶 | 键 | 说明 |
+|------|----|------|
+| `clawbot` | `token` | ClawBot / OpenClaw 微信通道的 iLink bot token，可在 Admin 面板「BOT」里扫码获取 |
+| `clawbot` | `enable` | 可选，设为 `false` 时禁用 |
+| `clawbot` | `api_base` | 可选，默认 `https://ilinkai.weixin.qq.com` |
+| `clawbot` | `debug` | 可选，设为 `true` 时输出 ClawBot 收发消息调试日志 |
+
+注意：
+
+- Admin 面板「BOT」中点击 `扫码获取` 会调用微信 ClawBot 登录接口，前端把返回的二维码链接渲染成二维码图片；扫码确认后会自动写入 `clawbot.token` 并启用 ClawBot。
+- ClawBot 的 `sendmessage` 依赖上游消息里的 `context_token`，因此不要把它当成无上下文主动推送通道使用。
+- 连接成功后，Admin 面板「BOT」和「概览」里会看到 `微信 ClawBot` 在线。
 
 ### QQ
 
@@ -518,15 +537,15 @@ SillyGirl 侧配置：
 接入步骤：
 
 1. 在 Telegram 找 `@BotFather` 创建 Bot，拿到 Bot Token。
-2. 在 Admin 面板「基础设置」填写 Telegram Bot 的 `Token`。
-3. 如果服务器访问 Telegram 官方 API 不通，在「基础设置」把「代理 API」设置为 `https://api.telegram.org` 的兼容反代地址。
+2. 在 Admin 面板「BOT」填写 Telegram Bot 的 `Token`。
+3. 如果服务器访问 Telegram 官方 API 不通，在「BOT」把「代理 API」设置为 `https://api.telegram.org` 的兼容反代地址。
 4. 保存后适配器会自动重启；日志出现 `telegram机器人(...)轮询已启动` 即表示接入成功。
 
 Telegram 当前使用 Bot API 长轮询模式，启动时会调用 `deleteWebhook`。如果这个 Bot 之前设置过 webhook，程序会自动清理后再开始轮询。
 
 ### Pagermaid
 
-Pagermaid 通过仓库内的桥接插件接入：
+Pagermaid 由 SillyGirl 内置 Go WebSocket 适配器接入，Pagermaid 端只需要仓库内的轻量桥接插件：
 
 ```text
 adapters/pagermaid/sillyplus.py
@@ -535,23 +554,32 @@ adapters/pagermaid/sillyplus.py
 接入步骤：
 
 1. 将 [sillyplus.py](adapters/pagermaid/sillyplus.py) 放到 Pagermaid 的插件目录。
-2. 把文件里的 `uri = "${rws()}"` 改成 SillyGirl 提供的 WebSocket 地址。
-3. 重启 Pagermaid，或在 Pagermaid 中重新加载插件。
-4. 在 Telegram 里发送 Pagermaid 命令 `sillyGirl`，返回 `傻+ 已连接` 表示桥接在线。
+2. 在 Admin 面板「BOT」开启 Pagermaid，可选填写「连接密钥」，然后复制页面显示的 WebSocket 地址。
+3. 把文件里的 `uri = "${rws()}"` 改成复制的 WebSocket 地址，或设置环境变量 `SILLYGIRL_PAGERMAID_WS`。
+4. 重启 Pagermaid，或在 Pagermaid 中重新加载插件。
+5. 在 Telegram 里发送 Pagermaid 命令 `sillyGirl`，返回 `傻+ 已连接` 表示桥接在线。
 
 WebSocket 地址格式：
 
 ```text
-ws://<SillyGirl地址>:8080/<你的WebSocket路径>
+ws://<SillyGirl地址>:8080/pagermaid/receive?token=<连接密钥>
 ```
 
 如果使用 HTTPS 反向代理：
 
 ```text
-wss://<域名>/<你的WebSocket路径>
+wss://<域名>/pagermaid/receive?token=<连接密钥>
 ```
 
-当前仓库提供的是 Pagermaid 端桥接脚本；SillyGirl 侧需要有对应的 WebSocket 插件或接口来处理这个路径。没有配置服务端 WebSocket 路由时，Pagermaid 端会一直离线或重连。
+SillyGirl 侧配置：
+
+| 存储桶 | 键 | 说明 |
+|------|----|------|
+| `pagermaid` | `enable` | 可选，设为 `false` 时禁用 |
+| `pagermaid` | `token` | 可选，Pagermaid WebSocket 连接密钥，公网部署建议填写 |
+| `pagermaid` | `debug` | 可选，设为 `true` 时输出 Pagermaid 收发消息调试日志 |
+
+连接成功后，Admin 面板「BOT」和「概览」里会显示 Pagermaid 在线。群监听、禁言、屏蔽用户和插件规则匹配都由 SillyGirl Go 核心处理，Pagermaid 桥接脚本只负责转发消息和执行发消息动作。
 
 更多细节见 `docs/` 目录。
 

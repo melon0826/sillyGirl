@@ -14,6 +14,7 @@ func TestParseGithubPublicFileIndexReadsDependenciesField(t *testing.T) {
     "author": "smallfawn",
     "version": "v1.0.0",
     "desc": "定时获取打印机状态",
+    "icon": "https://example.com/printer.png",
     "class": "工具",
     "path": "plugins/getPrinterStatus.js",
     "raw": "https://raw.githubusercontent.com/smallfawn/sillyGirl_Plugins/main/plugins/getPrinterStatus.js",
@@ -36,6 +37,9 @@ func TestParseGithubPublicFileIndexReadsDependenciesField(t *testing.T) {
 	}
 	if item.Class != "工具" {
 		t.Fatalf("Class = %q", item.Class)
+	}
+	if item.Icon != "https://example.com/printer.png" {
+		t.Fatalf("Icon = %q", item.Icon)
 	}
 	wantDeps := []string{"axios", "ipp"}
 	if !reflect.DeepEqual(item.Dependencies, wantDeps) {

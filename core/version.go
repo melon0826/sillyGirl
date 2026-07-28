@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	appVersion          = "0.2.0"
+	appVersion          = "0.2.1"
 	appRepository       = "https://github.com/smallfawn/sillyGirl"
 	remoteVersionRawURL = "https://raw.githubusercontent.com/smallfawn/sillyGirl/refs/heads/main/VERSION"
 )
@@ -37,7 +37,7 @@ var backendVersionStorageKeys = map[string]bool{
 
 func currentAppVersion() string {
 	version := normalizeAppVersion(compiledAppVersion())
-	if version == "" {
+	if version == "" || !appVersionPattern.MatchString(version) {
 		return appVersion
 	}
 	return version

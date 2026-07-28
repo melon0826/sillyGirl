@@ -145,7 +145,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		Title:       title,
 		Public:      public,
 		Description: description,
-		Icon:        icon,
+		Icon:        pluginIconOrDefault(icon),
 		Version:     version,
 		Author:      author,
 		Class:       strings.Join(classes, " "),

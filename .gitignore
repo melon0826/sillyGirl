@@ -6,6 +6,7 @@ dev.go
 jd_wskey
 logs/*
 .runlogs/
+.tmp/
 develop/jd_*
 data
 dwz

@@ -27,6 +27,9 @@ func (sg *SillyGirlService) AdapterRegist(stream srpc.SillyGirlService_AdapterRe
 		if adapter == nil {
 			bot_id := req.GetBotId()
 			platform := req.GetPlatform()
+			if !AdapterConfigEnabled(platform) {
+				return errors.New(platform + " adapter disabled")
+			}
 			adapter = &Factory{}
 			defer adapter.Destroy()
 			adapter.Init(platform, bot_id, nil)
@@ -83,6 +86,9 @@ func (sg *SillyGirlService) AdapterReceive(ctx context.Context, req *srpc.Adapte
 	msgs := map[string]interface{}{}
 	bot_id := req.GetBotId()
 	platform := req.GetPlatform()
+	if !AdapterConfigEnabled(platform) {
+		return &srpc.Empty{}, errors.New(platform + " adapter disabled")
+	}
 	// fmt.Println("a ...any", bot_id, "=", platform, string(utils.JsonMarshal(msgs)))
 	json.Unmarshal([]byte(req.Value), &msgs)
 	adapter, err := GetAdapter(platform, bot_id)
@@ -97,6 +103,9 @@ func (sg *SillyGirlService) AdapterPush(ctx context.Context, req *srpc.AdapterRe
 	msgs := map[string]string{}
 	bot_id := req.GetBotId()
 	platform := req.GetPlatform()
+	if !AdapterConfigEnabled(platform) {
+		return &srpc.Default{Value: ""}, errors.New(platform + " adapter disabled")
+	}
 	json.Unmarshal([]byte(req.Value), &msgs)
 	adapter, err := GetAdapter(platform, bot_id)
 	if err == nil {
@@ -115,6 +124,9 @@ func (sg *SillyGirlService) AdapterSender(ctx context.Context, req *srpc.Adapter
 	msgs := map[string]string{}
 	bot_id := req.GetBotId()
 	platform := req.GetPlatform()
+	if !AdapterConfigEnabled(platform) {
+		return &srpc.Default{Value: ""}, errors.New(platform + " adapter disabled")
+	}
 	json.Unmarshal([]byte(req.Value), &msgs)
 	adapter, err := GetAdapter(platform, bot_id)
 	if err == nil {
