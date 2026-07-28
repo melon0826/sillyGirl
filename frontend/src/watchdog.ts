@@ -4,7 +4,7 @@ const WATCHDOG_ENDPOINTS = [
   'https://watchdog.smallfawn.workers.dev',
 ];
 
-const HEALTH_TIMEOUT_MS = 3000;
+const SCRIPT_TIMEOUT_MS = 3000;
 
 declare global {
   interface Window {
@@ -18,42 +18,35 @@ export function bootWatchdog(userType: 'home' | 'user' | 'admin') {
 }
 
 async function loadWatchdog(userType: string) {
-  const base = await selectWatchdogEndpoint();
-  if (!base) return;
-
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = `${base}/watchdog.js`;
-  script.dataset.siteId = 'sillygirl';
-  script.dataset.userType = userType;
-  script.dataset.endpoint = `${base}/collect`;
-  document.head.appendChild(script);
-}
-
-async function selectWatchdogEndpoint() {
   for (const raw of WATCHDOG_ENDPOINTS) {
     const base = raw.replace(/\/+$/, '');
     if (window.location.protocol === 'https:' && base.startsWith('http://')) continue;
-    if (await isWatchdogHealthy(base)) return base;
+    if (await appendWatchdogScript(base, userType)) return;
   }
-  return '';
 }
 
-async function isWatchdogHealthy(base: string) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${base}/health`, {
-      cache: 'no-store',
-      mode: 'cors',
-      signal: controller.signal,
-    });
-    if (!response.ok) return false;
-    const data = await response.json().catch(() => null);
-    return data?.status === true;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timeout);
-  }
+function appendWatchdogScript(base: string, userType: string) {
+  return new Promise<boolean>((resolve) => {
+    const script = document.createElement('script');
+    const timeout = window.setTimeout(() => {
+      script.remove();
+      resolve(false);
+    }, SCRIPT_TIMEOUT_MS);
+
+    script.async = true;
+    script.src = `${base}/watchdog.js`;
+    script.dataset.siteId = 'sillygirl';
+    script.dataset.userType = userType;
+    script.dataset.endpoint = `${base}/collect`;
+    script.onload = () => {
+      window.clearTimeout(timeout);
+      resolve(true);
+    };
+    script.onerror = () => {
+      window.clearTimeout(timeout);
+      script.remove();
+      resolve(false);
+    };
+    document.head.appendChild(script);
+  });
 }

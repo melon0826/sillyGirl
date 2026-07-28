@@ -16,7 +16,6 @@ import (
 )
 
 var pluginLock = new(sync.Mutex)
-var plugin_dir = nodePluginsRoot()
 
 var mutexMap = make(map[string]*sync.Mutex)
 var mutexMapMutex sync.Mutex
@@ -155,10 +154,8 @@ func initPlugins() {
 						return true
 					})
 					if filename != "" {
-						if isFlatNodePluginPath(filename) {
-							os.Remove(filename)
-						} else {
-							os.RemoveAll(filepath.Dir(filename))
+						if err := removeNodePluginFiles(filename); err != nil {
+							console.Warn("卸载插件文件失败 %s: %v", filename, err)
 						}
 					}
 					console.Log("已卸载 %s%s", current.Title, current.Suffix)
@@ -171,6 +168,36 @@ func initPlugins() {
 		}
 		return &storage.Final{Now: storage.EMPTY}
 	})
+}
+
+func removeNodePluginFiles(filename string) error {
+	filename = filepath.Clean(strings.TrimSpace(filename))
+	if filename == "" {
+		return nil
+	}
+	root := nodePluginsRoot()
+	rel, err := filepath.Rel(root, filename)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("插件文件路径不合法")
+	}
+	if isFlatNodePluginPath(filename) {
+		if err := os.Remove(filename); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	dir := filepath.Dir(filename)
+	rel, err = filepath.Rel(root, dir)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("插件目录路径不合法")
+	}
+	if shouldIgnoreNodePluginEntry(filepath.Base(dir)) {
+		return errors.New("拒绝删除保留插件目录")
+	}
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func GetFunctionByUUID(uuid string) *common.Function {

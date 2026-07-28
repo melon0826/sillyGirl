@@ -245,7 +245,7 @@ func requestDaidaiToken(ctx context.Context, panel DaidaiPanel) (*daidaiTokenRes
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("呆呆面板接口 HTTP %d：%s", resp.StatusCode, daidaiTokenMessage(tokenResp, "请求失败"))
 	}
-	if tokenResp.Success == false && tokenResp.Data.AccessToken == "" {
+	if !tokenResp.Success && tokenResp.Data.AccessToken == "" {
 		return nil, errors.New(daidaiTokenMessage(tokenResp, "认证失败，请检查 app_key/app_secret"))
 	}
 	return tokenResp, nil

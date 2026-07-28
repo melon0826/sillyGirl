@@ -370,25 +370,6 @@ func DestroyAuth(c *gin.Context) {
 	c.SetCookie("token", "", -1, "/", "", false, true)
 }
 
-var tempAuth sync.Map
-
-func getTempAuth() string {
-	uuid := utils.GenUUID()
-	tempAuth.Store(uuid, time.Now().Unix())
-	return uuid
-}
-
-func checkTempAuth(uuid string) bool {
-	unix, ok := tempAuth.LoadAndDelete(uuid)
-	if !ok {
-		return false
-	}
-	if time.Now().Unix()-unix.(int64) > 1 {
-		return false
-	}
-	return true
-}
-
 func RequireAuth(c *gin.Context) {
 	if strings.TrimSpace(password) == "" {
 		ApiError(c, http.StatusUnauthorized, "后台未初始化，请先设置账号密码")
@@ -396,7 +377,7 @@ func RequireAuth(c *gin.Context) {
 	}
 	token := authTokenFromRequest(c)
 	_, err := CheckAuth(token)
-	if err != nil && !checkTempAuth(token) {
+	if err != nil {
 		ApiError(c, http.StatusUnauthorized, err.Error())
 		panic(err)
 	}

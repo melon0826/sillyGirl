@@ -159,7 +159,6 @@ type BaseSender struct {
 	params         []string
 	level          int
 	emf            map[string]interface{}
-	id             string
 	CreatedAt      time.Time
 	plugin_id      string
 }

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"sync"
 
 	"net"
@@ -163,7 +162,7 @@ func GetPidFromFile(pidFile string) (int, error) {
 	if _, err := os.Stat(pidFile); err != nil {
 		return 0, nil
 	}
-	data, err := ioutil.ReadFile(pidFile)
+	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, err
 	}
@@ -457,7 +456,7 @@ func GetPublicIP() (string, error) {
 	resp, err := http.Get("https://ipapi.co/ip/")
 	if err == nil {
 		defer resp.Body.Close()
-		ipBytes, err := ioutil.ReadAll(resp.Body)
+		ipBytes, err := io.ReadAll(resp.Body)
 		if err == nil {
 			ip = string(ipBytes)
 		}
@@ -472,7 +471,7 @@ func GetPublicIP() (string, error) {
 		resp, err = http.Get("https://ifconfig.co/ip")
 		if err == nil {
 			defer resp.Body.Close()
-			ipBytes, err := ioutil.ReadAll(resp.Body)
+			ipBytes, err := io.ReadAll(resp.Body)
 			if err == nil {
 				ip = string(ipBytes)
 			}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -86,7 +87,7 @@ func serveWebSocket(ctx *gin.Context) {
 		ctx.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if !validAuthorization(ctx.GetHeader("Authorization"), ctx.Query("token"), pagermaid.GetString("token")) {
+	if !validAuthorization(ctx.GetHeader("Authorization"), ctx.Query("token"), pagermaid.GetString("token"), ctx.Request.RemoteAddr) {
 		core.Logs.Warn("Pagermaid机器人token不正确")
 		ctx.AbortWithStatus(http.StatusUnauthorized)
 		return
@@ -326,10 +327,10 @@ func closeConnections() {
 	})
 }
 
-func validAuthorization(auth string, queryToken string, token string) bool {
+func validAuthorization(auth string, queryToken string, token string, remoteAddr string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return true
+		return isLoopbackRemote(remoteAddr)
 	}
 	for _, value := range []string{queryToken, auth} {
 		value = strings.TrimSpace(value)
@@ -344,6 +345,19 @@ func validAuthorization(auth string, queryToken string, token string) bool {
 		}
 	}
 	return false
+}
+
+func isLoopbackRemote(remoteAddr string) bool {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if remoteAddr == "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func validOrigin(r *http.Request) bool {

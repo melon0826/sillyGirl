@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"crypto/sha1"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +32,7 @@ func initNodePlugins() {
 	_ = ensureNodeSillygirlModule(root)
 	_, _ = ensurePythonSillygirlModule()
 	// fmt.Println("root", root)
-	files, _ := ioutil.ReadDir(root)
+	files, _ := os.ReadDir(root)
 	for _, file := range files {
 		if shouldIgnoreNodePluginEntry(file.Name()) {
 			continue
@@ -196,7 +196,7 @@ func addNodePluginLocked(path, name, class string) error {
 		return err
 	}
 	defer file.Close()
-	data, err := ioutil.ReadAll(file)
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return err
 	}

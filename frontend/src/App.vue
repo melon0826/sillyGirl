@@ -192,8 +192,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.2.1',
-    remote: info.remote || info.local || '0.2.1',
+    local: info.local || '0.2.2',
+    remote: info.remote || info.local || '0.2.2',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -2084,47 +2084,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="smallcat" :value="overviewIntegrations.find((item) => item.key === 'smallcat')?.count || 0" /></Card></Col>
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="呆呆容器" :value="overviewIntegrations.find((item) => item.key === 'daidai')?.count || 0" /></Card></Col>
               </Row>
-              <div style="margin-top: 16px">
-                <div class="toolbar">
-                  <div class="toolbar-left">
-                    <Server :size="16" />
-                    <Typography.Text strong>服务连接状态</Typography.Text>
-                  </div>
-                </div>
-                <Table :row-key="(row:any) => row.key" :data-source="overviewIntegrations" :pagination="false" size="small">
-                  <Table.Column title="服务" data-index="label" />
-                  <Table.Column title="状态" :width="120">
-                    <template #default="{ record }">
-                      <Tag :color="record.count > 0 && record.online ? 'green' : 'default'">{{ record.count > 0 && record.online ? '已连接' : '未连接' }}</Tag>
-                    </template>
-                  </Table.Column>
-                  <Table.Column title="总数" data-index="count" :width="100" />
-                  <Table.Column title="在线数" data-index="online_count" :width="100" />
-                </Table>
-              </div>
-              <div style="margin-top: 16px">
-                <div class="toolbar">
-                  <div class="toolbar-left">
-                    <Radio :size="16" />
-                    <Typography.Text strong>机器人连接状态</Typography.Text>
-                  </div>
-                  <Button @click="loadUser"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                </div>
-                <Table :row-key="(row:any) => row.platform" :data-source="overviewAdapters" :pagination="false" size="small">
-                  <Table.Column title="平台" data-index="label" />
-                  <Table.Column title="状态" :width="120">
-                    <template #default="{ record }">
-                      <Tag :color="record.online ? 'green' : 'default'">{{ record.online ? '已连接' : '未连接' }}</Tag>
-                    </template>
-                  </Table.Column>
-                  <Table.Column title="实例数" data-index="count" :width="100" />
-                  <Table.Column title="Bot ID">
-                    <template #default="{ record }">
-                      <Typography.Text class="mono">{{ record.bots_id?.length ? record.bots_id.join(', ') : '-' }}</Typography.Text>
-                    </template>
-                  </Table.Column>
-                </Table>
-              </div>
             </section>
 
             <section v-if="page === 'bots'" class="panel">
@@ -2133,7 +2092,12 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <Bot :size="16" />
                   <Typography.Text strong>BOT 对接管理</Typography.Text>
                 </div>
-                <Button @click="refreshBots"><template #icon><RefreshCw :size="16" /></template>刷新状态</Button>
+                <div class="toolbar-right">
+                  <Button @click="refreshBots"><template #icon><RefreshCw :size="16" /></template>刷新状态</Button>
+                  <Button type="primary" :loading="botSettings.saving" @click="saveBots">
+                    <template #icon><Save :size="16" /></template>保存 BOT 配置
+                  </Button>
+                </div>
               </div>
               <Spin :spinning="botSettings.loading">
                 <Table :row-key="(row:any) => row.platform" :data-source="botStatusRows" :pagination="false" size="small">
@@ -2276,9 +2240,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                   </section>
                 </div>
 
-                <Button type="primary" :loading="botSettings.saving" @click="saveBots">
-                  <template #icon><Save :size="16" /></template>保存 BOT 配置
-                </Button>
               </Spin>
             </section>
 

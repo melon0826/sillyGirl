@@ -2,7 +2,7 @@ package core
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -12,27 +12,6 @@ import (
 
 var temp *PersistentKeyValueStore
 var tempPath = filepath.Join(utils.GetDataHome(), "cache.json")
-
-var cache = func(pre string, sec int) interface{} {
-	return map[string]interface{}{
-		"set": func(key string, value interface{}, num int) {
-			if sec != 0 && num == 0 {
-				num = sec
-			}
-			temp.Set(pre+"_"+key, value, num)
-		},
-		"get": func(key string, def interface{}) interface{} {
-			v := temp.Get(pre + "_" + key)
-			if v == nil {
-				v = def
-			}
-			return v
-		},
-		"delete": func(key string) {
-			temp.Delete(pre + "_" + key)
-		},
-	}
-}
 
 type PersistentKeyValueStore struct {
 	sync.RWMutex
@@ -69,7 +48,7 @@ func (s *PersistentKeyValueStore) Set(key string, value interface{}, dur int) er
 		}()
 		jsonBytes, err := json.Marshal(s.data)
 		if err == nil {
-			ioutil.WriteFile(tempPath, jsonBytes, 0644)
+			os.WriteFile(tempPath, jsonBytes, 0644)
 		}
 	}()
 	return nil
@@ -94,7 +73,7 @@ func (s *PersistentKeyValueStore) Delete(key string) error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(tempPath, jsonBytes, 0644)
+	err = os.WriteFile(tempPath, jsonBytes, 0644)
 	if err != nil {
 		return err
 	}
@@ -106,7 +85,7 @@ func (s *PersistentKeyValueStore) LoadFromFile() error {
 	defer s.Unlock()
 
 	// Read data from file
-	jsonBytes, err := ioutil.ReadFile(tempPath)
+	jsonBytes, err := os.ReadFile(tempPath)
 	if err != nil {
 		return err
 	}
@@ -127,7 +106,7 @@ func (s *PersistentKeyValueStore) LoadFromFile() error {
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(tempPath, jsonBytes, 0644)
+	err = os.WriteFile(tempPath, jsonBytes, 0644)
 	if err != nil {
 		return err
 	}

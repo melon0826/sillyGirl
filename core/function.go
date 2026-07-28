@@ -46,17 +46,11 @@ type GroupInfo struct {
 }
 
 var AddNoReplyGroups = func(code string, desc string, plt string) {
-	_, loaded := NoReplyGroups.LoadOrStore(code, plt)
-	if !loaded {
-		// logs.Info(desc)
-	}
+	NoReplyGroups.LoadOrStore(code, plt)
 }
 
 var AddListenOnGroup = func(code string, desc string, plt string) {
-	_, loaded := ListenOnGroups.LoadOrStore(code, plt)
-	if !loaded {
-		// logs.Info(desc)
-	}
+	ListenOnGroups.LoadOrStore(code, plt)
 }
 
 var RemNoReplyGroups = func(code string, desc string) {

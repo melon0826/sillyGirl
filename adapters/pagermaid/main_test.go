@@ -3,16 +3,19 @@ package pagermaid
 import "testing"
 
 func TestValidAuthorization(t *testing.T) {
-	if !validAuthorization("", "", "") {
+	if !validAuthorization("", "", "", "127.0.0.1:12345") {
 		t.Fatal("empty token should allow local development connections")
 	}
-	if !validAuthorization("Bearer secret", "", "secret") {
+	if validAuthorization("", "", "", "192.168.1.20:12345") {
+		t.Fatal("empty token should reject non-local connections")
+	}
+	if !validAuthorization("Bearer secret", "", "secret", "192.168.1.20:12345") {
 		t.Fatal("bearer token should be accepted")
 	}
-	if !validAuthorization("", "secret", "secret") {
+	if !validAuthorization("", "secret", "secret", "192.168.1.20:12345") {
 		t.Fatal("query token should be accepted")
 	}
-	if validAuthorization("Bearer wrong", "", "secret") {
+	if validAuthorization("Bearer wrong", "", "secret", "127.0.0.1:12345") {
 		t.Fatal("wrong token should be rejected")
 	}
 }

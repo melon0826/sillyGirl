@@ -99,9 +99,7 @@ func getPluginConfigRecordWithIndex(uuid string, nodePluginNames map[string]stri
 	if data == "" {
 		return nil
 	}
-	if strings.HasPrefix(data, "o:") {
-		data = strings.TrimPrefix(data, "o:")
-	}
+	data = strings.TrimPrefix(data, "o:")
 	if err := json.Unmarshal([]byte(data), &schema); err != nil {
 		return nil
 	}
@@ -207,9 +205,7 @@ func getPluginUserConfig(uuid string) map[string]interface{} {
 	if data == "" {
 		return config
 	}
-	if strings.HasPrefix(data, "o:") {
-		data = strings.TrimPrefix(data, "o:")
-	}
+	data = strings.TrimPrefix(data, "o:")
 	json.Unmarshal([]byte(data), &config)
 	return config
 }

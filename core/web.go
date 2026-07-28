@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -358,7 +359,11 @@ func serveUser(c *gin.Context) {
 }
 
 func serveEmbeddedFile(c *gin.Context, name string) bool {
-	file, err := static.Open(strings.Trim(name, "/"))
+	name, err := safeEmbeddedFileName(name)
+	if err != nil {
+		return false
+	}
+	file, err := static.Open(name)
 	if err != nil {
 		return false
 	}
@@ -374,6 +379,26 @@ func serveEmbeddedFile(c *gin.Context, name string) bool {
 	c.Status(http.StatusOK)
 	io.Copy(c.Writer, file)
 	return true
+}
+
+func safeEmbeddedFileName(name string) (string, error) {
+	normalized := strings.Trim(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"), "/")
+	if normalized == "" || strings.Contains(normalized, "\x00") || strings.Contains(normalized, ":") {
+		return "", fmt.Errorf("静态资源路径不合法")
+	}
+	if strings.HasPrefix(normalized, "/") {
+		return "", fmt.Errorf("静态资源路径不合法")
+	}
+	for _, segment := range strings.Split(normalized, "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("静态资源路径不合法")
+		}
+	}
+	clean := path.Clean(normalized)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("静态资源路径不合法")
+	}
+	return clean, nil
 }
 
 type Req struct {

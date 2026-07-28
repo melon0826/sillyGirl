@@ -68,14 +68,7 @@ func initPluginList() {
 	sort.SliceStable(list, func(i, j int) bool {
 		return list[i].Description < list[j].Description
 	})
-	cyzl := "7642f5de-3300-11ed-8a79-52540066b468"
 	plugin_list = list
-	if sillyGirl.GetString("password") == "" && plugins.GetString(cyzl) == "" { //自动安装老版命令
-		plugins.Set(cyzl, "install")
-	}
-	// if plugins.GetString("78b15932-334f-11ed-8b59-aaaa00117a5c") == "" { //自动安装比价文案
-	// 	plugins.Set("78b15932-334f-11ed-8b59-aaaa00117a5c", "install")
-	// }
 }
 
 var plugin_downloads = MakeBucket("plugin_downloads")
@@ -229,7 +222,7 @@ func initWebPluginList() {
 			}
 			classesNum["全部"] = len(list)
 			if class != "全部" {
-				list, _ = classes[class]
+				list = classes[class]
 			}
 			rr.Class = classesNum
 			var origins = map[string]string{}
