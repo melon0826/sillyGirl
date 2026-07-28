@@ -15,6 +15,7 @@ sets.conf
 *.exe
 yummy
 _*
+!core/admin/assets/_plugin-vue_export-helper-*.js
 fanli_vip
 cable
 sillyGirl.cache
