@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -182,39 +183,38 @@ func GetBucketKeyValue(bucket storage.Bucket, ps ...interface{}) interface{} {
 }
 
 func SetBucketKeyValue(bucket storage.Bucket, key interface{}, value interface{}) (string, bool, error) {
-	new := ""
-	switch value := value.(type) {
-	case int, int64, int32, uint:
-		new = fmt.Sprintf("d:%d", value)
-	case float32, float64:
-		new = fmt.Sprintf("f:%f", value)
-	case string, []byte:
-		new = fmt.Sprintf("%s", value)
-	case bool:
-		new = fmt.Sprintf("b:%t", value)
-	case nil:
-		new = ""
-	default:
-		new = fmt.Sprintf("o:%s", utils.JsonMarshal(value))
-	}
-	return bucket.Set(key, new)
+	return bucket.Set(key, encodeBucketValue(value))
 }
 
 func SetBucketKeyValue2(bucket storage.Bucket, key interface{}, value interface{}) (string, bool, error) {
-	new := ""
+	return bucket.Set2(key, encodeBucketValue(value))
+}
+
+func encodeBucketValue(value interface{}) string {
 	switch value := value.(type) {
 	case int, int64, int32, uint:
-		new = fmt.Sprintf("d:%d", value)
-	case float32, float64:
-		new = fmt.Sprintf("f:%f", value)
+		return fmt.Sprintf("d:%d", value)
+	case float32:
+		return encodeBucketFloat(float64(value))
+	case float64:
+		return encodeBucketFloat(value)
 	case string, []byte:
-		new = fmt.Sprintf("%s", value)
+		return fmt.Sprintf("%s", value)
 	case bool:
-		new = fmt.Sprintf("b:%t", value)
+		return fmt.Sprintf("b:%t", value)
 	case nil:
-		new = ""
+		return ""
 	default:
-		new = fmt.Sprintf("o:%s", utils.JsonMarshal(value))
+		return fmt.Sprintf("o:%s", utils.JsonMarshal(value))
 	}
-	return bucket.Set2(key, new)
+}
+
+func encodeBucketFloat(value float64) string {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return "f:0.000000"
+	}
+	if math.Trunc(value) == value && value >= math.MinInt64 && value <= math.MaxInt64 {
+		return fmt.Sprintf("d:%d", int64(value))
+	}
+	return fmt.Sprintf("f:%f", value)
 }

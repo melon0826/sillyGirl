@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -264,10 +265,11 @@ func initWeb() {
 		// handleHTTP(c.Writer, c.Request)
 	})
 
-	port := sillyGirl.GetInt("port")
-	if port == 0 {
+	port := normalizeHTTPPort(sillyGirl.GetString("port"))
+	if port == 8080 && strings.TrimSpace(sillyGirl.GetString("port")) == "" {
 		sillyGirl.Set("port", 8080)
-		port = 8080
+	} else if stored := strings.TrimSpace(sillyGirl.GetString("port")); stored != fmt.Sprint(port) && stored != fmt.Sprintf("d:%d", port) {
+		sillyGirl.Set("port", port)
 	}
 	srvs := []*http.Server{{
 		Addr:    ":" + fmt.Sprint(port),
@@ -275,25 +277,26 @@ func initWeb() {
 	}}
 
 	storage.Watch(sillyGirl, "port", func(old, new, key string) *storage.Final {
-		if new == "" {
-			new = "8080"
-		}
-		if old == new {
+		port := normalizeHTTPPort(new)
+		normalized := fmt.Sprint(port)
+		if normalizeHTTPPort(old) == port {
 			return nil
 		}
-		port := new
+		if strings.TrimSpace(new) != normalized && strings.TrimSpace(new) != fmt.Sprintf("d:%d", port) {
+			sillyGirl.Set("port", port)
+		}
 		// console.Log("port", new)
 		srv := &http.Server{
-			Addr:    ":" + port,
+			Addr:    ":" + normalized,
 			Handler: Server,
 		}
 		var ch = make(chan error, 1)
 		srvs = append(srvs, srv)
 
 		go func() {
-			logs.Info("Http服务(%v)重新运行", port)
+			logs.Info("Http服务(%v)重新运行", normalized)
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logs.Error("Http服务(%v)运行失败：%s", port, err.Error())
+				logs.Error("Http服务(%v)运行失败：%s", normalized, err.Error())
 				ch <- err
 			}
 		}()
@@ -399,6 +402,23 @@ func safeEmbeddedFileName(name string) (string, error) {
 		return "", fmt.Errorf("静态资源路径不合法")
 	}
 	return clean, nil
+}
+
+func normalizeHTTPPort(value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 8080
+	}
+	if strings.HasPrefix(value, "d:") || strings.HasPrefix(value, "f:") {
+		value = strings.TrimSpace(value[2:])
+	}
+	if f, err := strconv.ParseFloat(value, 64); err == nil {
+		port := int(f)
+		if port >= 1 && port <= 65535 {
+			return port
+		}
+	}
+	return 8080
 }
 
 type Req struct {
