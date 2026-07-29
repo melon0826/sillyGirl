@@ -299,6 +299,7 @@ func addNodePluginLocked(path, name, class string) error {
 		cmd.Env = append(cmd.Env, "PLUGIN_ID="+uuid)
 		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_ADDR="+grpcClientAddress())
 		cmd.Env = append(cmd.Env, "SILLYGIRL_GRPC_TOKEN="+grpcRuntimeMetadataToken())
+		cmd.Env = append(cmd.Env, sillyGirlRuntimeEnv()...)
 		if class == NODE || class == PYTHON {
 			cmd.Env = append(cmd.Env, "PLUGIN_CONFIG_JSON="+string(utils.JsonMarshal(getPluginUserConfig(uuid))))
 		}
@@ -786,4 +787,71 @@ func CheckMainIndex(filename string) (string, bool) {
 		return PYTHON, true
 	}
 	return "", false
+}
+
+func sillyGirlRuntimeEnv() []string {
+	appDir := detectSillyGirlAppDir()
+	latest, source := latestAppVersion()
+	values := []string{
+		"SILLYGIRL_VERSION=" + currentAppVersion(),
+		"SILLYGIRL_REMOTE_VERSION=" + latest,
+		"SILLYGIRL_VERSION_SOURCE=" + source,
+		"SILLYGIRL_REPOSITORY=" + appRepository,
+	}
+	if appDir != "" {
+		values = append(values, "SILLYGIRL_APP_DIR="+appDir)
+	}
+	return values
+}
+
+func detectSillyGirlAppDir() string {
+	wd, _ := os.Getwd()
+	candidates := dedupeCleanPaths([]string{
+		os.Getenv("SILLYGIRL_APP_DIR"),
+		wd,
+		utils.ExecPath,
+		filepath.Dir(utils.ExecPath),
+		"/app",
+		"/data/sillyGirl",
+	})
+	for _, candidate := range candidates {
+		if repo := gitTopLevel(candidate); repo != "" && looksLikeSillyGirlRepo(repo) {
+			return repo
+		}
+		if looksLikeSillyGirlRepo(candidate) {
+			return candidate
+		}
+	}
+	if wd != "" {
+		return wd
+	}
+	return ""
+}
+
+func gitTopLevel(dir string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	output, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func looksLikeSillyGirlRepo(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	required := []string{
+		filepath.Join(dir, "go.mod"),
+		filepath.Join(dir, "core", "version.go"),
+		filepath.Join(dir, "proto3", "sillygirl.js"),
+	}
+	for _, item := range required {
+		if _, err := os.Stat(item); err != nil {
+			return false
+		}
+	}
+	return true
 }

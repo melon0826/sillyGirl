@@ -281,10 +281,17 @@ interface UpdateResult {
     output: string;
     restarted: boolean;
 }
+interface VersionInfo {
+    current: string;
+    remote: string;
+    source: string;
+    repository: string;
+}
 declare function restart(): Promise<{
     message?: string;
     changed?: boolean;
 }>;
+declare function version(): Promise<VersionInfo>;
 declare function update(options?: UpdateOptions): Promise<UpdateResult>;
 interface CQItem {
     type: string;
@@ -305,4 +312,4 @@ declare let console: {
     error(...args: any[]): void;
     debug(...args: any[]): void;
 };
-export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, restart, update, utils, console, };
+export { Adapter, Bucket, QingLong, SmallCat, DaiDai, sillyGirlCreateSchema, SillyGirlPluginConfig, form, pluginConfigDefaults, sender, pushAdmin, sleep, version, restart, update, utils, console, };

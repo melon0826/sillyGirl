@@ -38,6 +38,7 @@ exports.form = form;
 exports.pluginConfigDefaults = pluginConfigDefaults;
 exports.pushAdmin = pushAdmin;
 exports.sleep = sleep;
+exports.version = version;
 exports.restart = restart;
 exports.update = update;
 const srpc_1 = require("./srpc");
@@ -1248,6 +1249,16 @@ function restartStamp() {
 }
 async function restart() {
     return new Bucket("sillyGirl").set("started_at", restartStamp());
+}
+async function version() {
+    const current = String(process.env?.SILLYGIRL_VERSION || "").trim() || "unknown";
+    const remote = String(process.env?.SILLYGIRL_REMOTE_VERSION || "").trim() || current;
+    return {
+        current,
+        remote,
+        source: String(process.env?.SILLYGIRL_VERSION_SOURCE || "").trim(),
+        repository: String(process.env?.SILLYGIRL_REPOSITORY || "").trim(),
+    };
 }
 async function update(options = {}) {
     const timeout = clampNumber(options.timeout || 120, 10, 600);

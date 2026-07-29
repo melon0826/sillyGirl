@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	proto3assets "github.com/smallfawn/sillyGirl/proto3"
 )
 
 func TestEnsureNodePackageJSONRepairsInvalidDependencyFields(t *testing.T) {
@@ -110,6 +112,46 @@ func TestEnsureNodeSillygirlModuleWritesRuntimeFiles(t *testing.T) {
 	} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("expected runtime file %s: %v", name, err)
+		}
+	}
+}
+
+func TestEnsureNodeSillygirlModuleWorksWithoutProto3Directory(t *testing.T) {
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previous)
+	})
+
+	dir := t.TempDir()
+	if err := ensureNodeSillygirlModule(dir); err != nil {
+		t.Fatalf("ensureNodeSillygirlModule returned error without proto3 directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node_modules", "sillygirl", "index.js")); err != nil {
+		t.Fatalf("missing embedded node runtime index.js: %v", err)
+	}
+}
+
+func TestEmbeddedRuntimeFilesAvailable(t *testing.T) {
+	for _, name := range []string{
+		"sillygirl.js",
+		"srpc.js",
+		"sillygirl.d.ts",
+		"sillygirl.py",
+		"srpc_pb2.py",
+		"srpc_pb2_grpc.py",
+	} {
+		data, err := proto3assets.ReadRuntimeFile(name)
+		if err != nil {
+			t.Fatalf("missing embedded runtime file %s: %v", name, err)
+		}
+		if len(data) == 0 {
+			t.Fatalf("embedded runtime file %s is empty", name)
 		}
 	}
 }

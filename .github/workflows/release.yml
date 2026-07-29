@@ -91,10 +91,17 @@ jobs:
               -ldflags="${ldflags}" \
               -o "build/${binary}" .
 
+            package_dir="build/${name}-package"
+            rm -rf "${package_dir}"
+            mkdir -p "${package_dir}/proto3"
+            cp "build/${binary}" "${package_dir}/${binary}"
+            cp proto3/sillygirl.js proto3/sillygirl.d.ts proto3/srpc.js "${package_dir}/proto3/"
+            cp proto3/sillygirl.py proto3/srpc_pb2.py proto3/srpc_pb2_grpc.py "${package_dir}/proto3/"
+
             if [[ "${goos}" == "windows" ]]; then
-              (cd build && zip "../dist/${name}.zip" "${binary}")
+              (cd "${package_dir}" && zip -r "../../dist/${name}.zip" "${binary}" proto3)
             else
-              tar -czf "dist/${name}.tar.gz" -C build "${binary}"
+              tar -czf "dist/${name}.tar.gz" -C "${package_dir}" "${binary}" proto3
             fi
           done
 

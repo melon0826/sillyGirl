@@ -45,6 +45,7 @@ func registerNodePluginConfigSchema(path, uuid string) error {
 		"SILLYGIRL_CONFIG_REGISTER_ONLY=true",
 		"SILLYGIRL_CONFIG_SCHEMA_FILE="+tempPath,
 	)
+	cmd.Env = append(cmd.Env, sillyGirlRuntimeEnv()...)
 	if nodePath := nodeRuntimeNodePath(); nodePath != "" {
 		cmd.Env = append(cmd.Env, "NODE_PATH="+nodePath)
 	}

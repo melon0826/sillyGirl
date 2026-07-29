@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/smallfawn/sillyGirl/core/common"
+	proto3assets "github.com/smallfawn/sillyGirl/proto3"
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
@@ -1267,16 +1268,43 @@ func copyNodeRuntimeFile(name, target string) error {
 			return nil
 		}
 	}
+	if data, err := proto3assets.ReadRuntimeFile(name); err == nil {
+		return writeFileIfChanged(target, data, 0644)
+	}
 	return fmt.Errorf("缺少 NodeJS sillygirl 运行时文件：%s", name)
 }
 
 func nodeRuntimeSourceCandidates(name string) []string {
-	return []string{
+	wd, _ := os.Getwd()
+	candidates := []string{
 		filepath.Join("proto3", name),
 		filepath.Join("..", "proto3", name),
 		filepath.Join(utils.ExecPath, "proto3", name),
 		filepath.Join(filepath.Dir(utils.ExecPath), "proto3", name),
+		filepath.Join("/app", "proto3", name),
 	}
+	if wd != "" {
+		candidates = append(candidates, filepath.Join(wd, "proto3", name))
+	}
+	return dedupeCleanPaths(candidates)
+}
+
+func dedupeCleanPaths(candidates []string) []string {
+	seen := map[string]bool{}
+	paths := []string{}
+	for _, item := range candidates {
+		item = filepath.Clean(strings.TrimSpace(item))
+		if item == "." || item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		paths = append(paths, item)
+	}
+	return paths
 }
 
 func copyFile(source, target string) error {
