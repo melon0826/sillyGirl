@@ -105,7 +105,7 @@ jobs:
             fi
           done
 
-          sha256sum dist/* > dist/checksums.txt
+          (cd dist && sha256sum sillyGirl_* > checksums.txt)
 
       - name: Publish GitHub Release
         if: steps.vars.outputs.publish_release == 'true'

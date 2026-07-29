@@ -1367,7 +1367,8 @@ async function verifyReleaseChecksum(release, asset, archive, timeout) {
 function parseReleaseChecksum(text, fileName) {
     for (const line of String(text || "").split(/\r?\n/)) {
         const parts = line.trim().split(/\s+/);
-        if (parts.length >= 2 && parts[1].replace(/^\*/, "") === fileName && /^[a-f0-9]{64}$/i.test(parts[0]))
+        const checkedName = path.basename(parts[1] ? parts[1].replace(/^\*/, "") : "");
+        if (parts.length >= 2 && checkedName === fileName && /^[a-f0-9]{64}$/i.test(parts[0]))
             return parts[0];
     }
     return "";

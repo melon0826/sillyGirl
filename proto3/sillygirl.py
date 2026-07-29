@@ -1176,7 +1176,8 @@ def _select_release_asset(release, options):
 def _parse_release_checksum(text, file_name):
     for line in str(text or "").splitlines():
         parts = line.strip().split()
-        if len(parts) >= 2 and parts[1].lstrip("*") == file_name and re.match(r"^[a-fA-F0-9]{64}$", parts[0]):
+        checked_name = os.path.basename(parts[1].lstrip("*")) if len(parts) >= 2 else ""
+        if len(parts) >= 2 and checked_name == file_name and re.match(r"^[a-fA-F0-9]{64}$", parts[0]):
             return parts[0]
     return ""
 
