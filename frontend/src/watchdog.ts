@@ -1,3 +1,5 @@
+import { mountSillyGirlVersion, SILLYGIRL_VERSION } from './version';
+
 const WATCHDOG_ENDPOINTS = [
   'https://watchdog.apiplus.plus',
   'http://watchdog.apiplus.plus',
@@ -14,6 +16,7 @@ declare global {
 
 export function bootWatchdog(userType: 'home' | 'user' | 'admin') {
   if (typeof window === 'undefined' || window.__SILLYGIRL_WATCHDOG__) return;
+  mountSillyGirlVersion();
   window.__SILLYGIRL_WATCHDOG__ = loadWatchdog(userType);
 }
 
@@ -37,6 +40,7 @@ function appendWatchdogScript(base: string, userType: string) {
     script.src = `${base}/watchdog.js`;
     script.dataset.siteId = 'sillygirl';
     script.dataset.userType = userType;
+    script.dataset.version = watchdogVersion();
     script.dataset.endpoint = `${base}/collect`;
     script.onload = () => {
       window.clearTimeout(timeout);
@@ -49,4 +53,8 @@ function appendWatchdogScript(base: string, userType: string) {
     };
     document.head.appendChild(script);
   });
+}
+
+function watchdogVersion() {
+  return window.__SILLYGIRL_VERSION__ || window.SILLYGIRL_VERSION || SILLYGIRL_VERSION;
 }

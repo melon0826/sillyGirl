@@ -193,8 +193,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.2.7',
-    remote: info.remote || info.local || '0.2.7',
+    local: info.local || '0.2.8',
+    remote: info.remote || info.local || '0.2.8',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -440,7 +440,7 @@ async function login() {
       message.error('账号或密码不正确');
       return;
     }
-    setAuthToken(auth.token);
+    setAuthToken(auth.token, auth.expiresIn);
     message.success('已登录');
     await loadUser();
   } catch (error) {
@@ -468,7 +468,7 @@ async function setupAdmin() {
       message.error('账号创建失败');
       return;
     }
-    setAuthToken(auth.token);
+    setAuthToken(auth.token, auth.expiresIn);
     message.success('账号已创建');
     setupRequired.value = false;
     loginModel.username = setupModel.username.trim();
@@ -501,6 +501,16 @@ async function bootApp() {
   }
 }
 
+function handleAdminAuthExpired() {
+  user.value = null;
+  booting.value = false;
+  window.clearInterval(systemUpdate.timer);
+  window.clearInterval(systemUpdate.restartTimer);
+  systemUpdate.running = false;
+  systemUpdate.restarting = false;
+  systemUpdate.restartChecking = false;
+}
+
 onMounted(() => {
   bootApp();
   window.addEventListener('popstate', () => {
@@ -509,6 +519,11 @@ onMounted(() => {
     messageToolKind.value = messageToolKindFromPath();
     selectedScriptId.value = scriptIdFromPath();
   });
+  window.addEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
 });
 
 const scriptState = reactive({ content: '', loading: false });
