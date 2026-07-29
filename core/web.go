@@ -100,11 +100,10 @@ func initWeb() {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	Server = gin.New()
-	// Server.Use(gin.Recovery())
 	Server.Use(Cors())
 	Server.Use(SecurityHeaders())
 	Server.Use(gzip.Gzip(gzip.DefaultCompression))
-	Server.GET("/api/file/:filename", FindFile)
+	Server.GET("/api/file/*filename", FindFile)
 	Server.GET("/api/decode/:random", Base642Binary)
 
 	Server.GET("/api/plugins/download", func(c *gin.Context) {
@@ -125,7 +124,6 @@ func initWeb() {
 					name := ss[len(ss)-1]
 					buf := new(bytes.Buffer)
 					w := zip.NewWriter(buf)
-					// dir = strings.Replace(dir, utils.ExecPath+"", ".", 1)
 					err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 						if err != nil {
 							return err
@@ -201,14 +199,6 @@ func initWeb() {
 						return
 					}
 					c.Data(http.StatusOK, "application/zip", buf.Bytes())
-					// zippath := utils.ExecPath + "/public/" + f.UUID + ".zip"
-					// file, err := os.Open(zippath)
-					// if err != nil {
-					// 	return
-					// }
-					// defer file.Close()
-					// c.Header("Content-Type", "application/zip")
-					// io.Copy(c.Writer, file)
 					return
 				}
 			}
@@ -225,9 +215,6 @@ func initWeb() {
 		}
 	})
 	Server.NoRoute(func(c *gin.Context) {
-		// if c.Request.URL.Path != "/api/web_chat" {
-		// 	logs.Debug(c.Request.URL.Path)
-		// }
 		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/" {
 			serveHome(c)
 			return
@@ -260,32 +247,27 @@ func initWeb() {
 			}
 		}
 		c.String(404, "页面被喵咪劫走了") //
-		//开启代理模式
-
-		// handleHTTP(c.Writer, c.Request)
 	})
 
-	port := normalizeHTTPPort(sillyGirl.GetString("port"))
+	port, normalizedPort := canonicalHTTPPortValue(sillyGirl.GetString("port"))
 	if port == 8080 && strings.TrimSpace(sillyGirl.GetString("port")) == "" {
 		sillyGirl.Set("port", 8080)
-	} else if stored := strings.TrimSpace(sillyGirl.GetString("port")); stored != fmt.Sprint(port) && stored != fmt.Sprintf("d:%d", port) {
+	} else if stored := strings.TrimSpace(sillyGirl.GetString("port")); stored != normalizedPort && stored != fmt.Sprintf("d:%d", port) {
 		sillyGirl.Set("port", port)
 	}
 	srvs := []*http.Server{{
-		Addr:    ":" + fmt.Sprint(port),
+		Addr:    ":" + normalizedPort,
 		Handler: Server,
 	}}
 
 	storage.Watch(sillyGirl, "port", func(old, new, key string) *storage.Final {
-		port := normalizeHTTPPort(new)
-		normalized := fmt.Sprint(port)
+		port, normalized := canonicalHTTPPortValue(new)
 		if normalizeHTTPPort(old) == port {
+			if strings.TrimSpace(new) != normalized {
+				return &storage.Final{Now: normalized}
+			}
 			return nil
 		}
-		if strings.TrimSpace(new) != normalized && strings.TrimSpace(new) != fmt.Sprintf("d:%d", port) {
-			sillyGirl.Set("port", port)
-		}
-		// console.Log("port", new)
 		srv := &http.Server{
 			Addr:    ":" + normalized,
 			Handler: Server,
@@ -310,12 +292,12 @@ func initWeb() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := srvs[0].Shutdown(ctx); err == nil {
-				logs.Info("Http服务(%v)关闭", old)
+				logs.Info("Http服务(%v)关闭", normalizeHTTPPort(old))
 			}
 			srvs = srvs[1:]
 		}
 		return &storage.Final{
-			Now: new,
+			Now: normalized,
 		}
 	})
 
@@ -419,6 +401,11 @@ func normalizeHTTPPort(value string) int {
 		}
 	}
 	return 8080
+}
+
+func canonicalHTTPPortValue(value string) (int, string) {
+	port := normalizeHTTPPort(value)
+	return port, fmt.Sprint(port)
 }
 
 type Req struct {

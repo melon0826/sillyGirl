@@ -263,12 +263,10 @@ declare function pushAdmin(content: string, options?: PushAdminOptions): Promise
 }[]>;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
-    mode?: string;
-    appDir?: string;
-    gitRemote?: string;
-    gitBranch?: string;
-    dockerSocket?: string;
-    dockerWatchtowerImage?: string;
+    releaseRepo?: string;
+    releaseTag?: string;
+    releaseAsset?: string;
+    executablePath?: string;
     timeout?: number;
     restart?: boolean;
 }

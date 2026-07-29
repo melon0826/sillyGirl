@@ -13,9 +13,6 @@ import (
 	"github.com/smallfawn/sillyGirl/utils"
 )
 
-// var plugin_path = "/etc/sillyGirl/public/"
-// var plugin_download_file = plugin_path + "download"
-
 func CheckPluginAddress(address string) error {
 	if !strings.HasSuffix(address, "list.json") {
 		address += "/api/plugins/list.json"
@@ -53,14 +50,6 @@ func initPluginPublish() {
 			Error:   err,
 		}
 	})
-
-	// os.MkdirAll(plugin_download_file, 0666)
-	// os.WriteFile(plugin_path+"list.json", utils.JsonMarshal(GetPublicResponse()), 0666)
-	// for _, f := range Functions {
-	// 	if f.UUID != "" && f.Public {
-	// 		os.WriteFile(fmt.Sprintf("%s/%s.js", plugin_download_file, f.UUID), []byte(publicScript(plugins.GetString(f.UUID))), 0666)
-	// 	}
-	// }
 }
 
 func publicScript(str string) string {

@@ -630,12 +630,10 @@ declare function pushAdmin(content: string, options?: PushAdminOptions): Promise
 }[]>;
 declare function sleep(ms?: number): Promise<unknown>;
 interface UpdateOptions {
-	mode?: string;
-	appDir?: string;
-	gitRemote?: string;
-	gitBranch?: string;
-	dockerSocket?: string;
-	dockerWatchtowerImage?: string;
+	releaseRepo?: string;
+	releaseTag?: string;
+	releaseAsset?: string;
+	executablePath?: string;
 	timeout?: number;
 	restart?: boolean;
 }
@@ -797,11 +795,23 @@ func sillyGirlRuntimeEnv() []string {
 		"SILLYGIRL_REMOTE_VERSION=" + latest,
 		"SILLYGIRL_VERSION_SOURCE=" + source,
 		"SILLYGIRL_REPOSITORY=" + appRepository,
+		"SILLYGIRL_EXEC_PATH=" + currentExecutablePath(),
+	}
+	if proxy := strings.TrimSpace(githubAcceleratorPrefix()); proxy != "" {
+		values = append(values, "SILLYGIRL_GITHUB_PROXY="+proxy)
 	}
 	if appDir != "" {
 		values = append(values, "SILLYGIRL_APP_DIR="+appDir)
 	}
 	return values
+}
+
+func currentExecutablePath() string {
+	execPath, err := os.Executable()
+	if err != nil || strings.TrimSpace(execPath) == "" {
+		execPath, _ = filepath.Abs(os.Args[0])
+	}
+	return execPath
 }
 
 func detectSillyGirlAppDir() string {

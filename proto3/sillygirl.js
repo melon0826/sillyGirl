@@ -45,8 +45,9 @@ const srpc_1 = require("./srpc");
 const grpc_1 = __importStar(require("@grpc/grpc-js"));
 const util_1 = require("util");
 const { execFile } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
-const http = require("http");
+const os = require("os");
 const path = require("path");
 grpc_1.setLogVerbosity(grpc_1.logVerbosity.NONE);
 let client = new srpc_1.srpc.SillyGirlServiceClient(process.env?.SILLYGIRL_GRPC_ADDR || "127.0.0.1:50051", grpc_1.credentials.createInsecure());
@@ -1262,239 +1263,264 @@ async function version() {
 }
 async function update(options = {}) {
     const timeout = clampNumber(options.timeout || 120, 10, 600);
-    const mode = String(options.mode || "auto").trim().toLowerCase();
-    if (mode === "docker")
-        return updateDocker(options, timeout);
+    return updateRelease(options, timeout);
+}
+async function updateRelease(options, timeout) {
+    const beforeInfo = await version();
+    const release = await fetchReleaseMetadata(options, timeout);
+    const asset = selectReleaseAsset(release, options);
+    if (!asset) {
+        throw new Error(`未找到适配当前系统的 Release 包：${release.tag_name || release.name || "latest"}`);
+    }
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sillygirl-update-"));
+    const archive = path.join(tmpDir, safeFileName(asset.name || "sillyGirl-release"));
     try {
-        return await updateGit(options, timeout);
+        await curlDownload(releaseDownloadURLs(asset.browser_download_url), archive, timeout);
+        await verifyReleaseChecksum(release, asset, archive, timeout);
+        await extractReleaseArchive(archive, tmpDir, timeout);
+        const executablePath = releaseExecutablePath(options);
+        await installReleasePayload(tmpDir, executablePath);
+        const restarted = options.restart !== false;
+        if (restarted)
+            await restart();
+        return {
+            mode: "release",
+            repo: release.html_url || `release:${release.tag_name || ""}`,
+            before: beforeInfo.current,
+            after: normalizeVersionText(release.tag_name || release.name || ""),
+            changed: true,
+            output: `已通过 curl 下载并安装 Release 包：${asset.name}。${restarted ? "已触发重启，请等待 1-2 分钟后刷新页面。" : "未自动重启。"}`,
+            restarted,
+        };
     }
-    catch (error) {
-        if (mode === "git" || !(await canUseDockerUpdate(options)))
-            throw error;
-        return updateDocker(options, timeout, error);
+    finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
     }
 }
-async function updateGit(options, timeout) {
-    const repo = await resolveSillyGirlRepo(options.appDir, timeout);
-    const remote = String(options.gitRemote || "origin").trim() || "origin";
-    const before = (await git(repo, ["rev-parse", "--short", "HEAD"], timeout)).stdout.trim();
-    await git(repo, ["fetch", remote, "--prune"], timeout);
-    const pullArgs = await pullCommand(repo, remote, options.gitBranch, timeout);
-    const pulled = await git(repo, pullArgs, timeout);
-    const after = (await git(repo, ["rev-parse", "--short", "HEAD"], timeout)).stdout.trim();
-    const restarted = Boolean(options.restart);
-    if (restarted)
-        await restart();
-    return {
-        mode: "git",
-        repo,
-        before,
-        after,
-        changed: before !== after,
-        output: compactRuntimeOutput(pulled.stdout || pulled.stderr),
-        restarted,
-    };
-}
-async function canUseDockerUpdate(options) {
-    const socket = dockerSocketPath(options);
-    return fs.existsSync(socket) && (fs.existsSync("/.dockerenv") || Boolean(process.env?.HOSTNAME));
-}
-async function updateDocker(options, timeout, gitError) {
-    const socket = dockerSocketPath(options);
-    if (!fs.existsSync(socket)) {
-        const suffix = gitError ? `；Git 更新失败：${errorMessage(gitError)}` : "";
-        throw new Error(`Docker 更新需要挂载 ${socket}，请在部署命令中增加 -v /var/run/docker.sock:/var/run/docker.sock${suffix}`);
-    }
-    const containerID = await currentDockerContainerID(socket, timeout);
-    const inspect = await dockerJSON(socket, "GET", `/containers/${encodeURIComponent(containerID)}/json`, undefined, timeout);
-    const containerName = String(inspect.Name || "").replace(/^\/+/, "");
-    if (!containerName)
-        throw new Error("Docker 更新失败：无法识别当前容器名称");
-    const currentImage = String(inspect.Config?.Image || inspect.Image || "");
-    const watchtowerImage = String(options.dockerWatchtowerImage || process.env?.SILLYGIRL_WATCHTOWER_IMAGE || "containrrr/watchtower:latest").trim();
-    await pullDockerImage(socket, watchtowerImage, timeout);
-    const helperName = `sillygirl-watchtower-${Date.now()}`;
-    const create = await dockerJSON(socket, "POST", `/containers/create?name=${encodeURIComponent(helperName)}`, {
-        Image: watchtowerImage,
-        Cmd: ["--run-once", "--cleanup", "--include-restarting", containerName],
-        Labels: {
-            "sillygirl.update": "watchtower",
-            "sillygirl.target": containerName,
-        },
-        HostConfig: {
-            AutoRemove: true,
-            Binds: [`${socket}:/var/run/docker.sock`],
-        },
-    }, timeout);
-    const helperID = String(create.Id || create.ID || "");
-    if (!helperID)
-        throw new Error("Docker 更新失败：Watchtower helper 创建失败");
-    await dockerRequest(socket, "POST", `/containers/${encodeURIComponent(helperID)}/start`, undefined, timeout);
-    return {
-        mode: "docker",
-        repo: `docker:${containerName}`,
-        before: currentImage,
-        after: currentImage,
-        changed: true,
-        output: `已启动一次性 Watchtower 更新容器 ${containerName}，镜像会拉取并重建；如果当前镜像使用 latest 标签，稍后会自动切换到最新正式镜像。`,
-        restarted: true,
-    };
-}
-function dockerSocketPath(options) {
-    return String(options.dockerSocket || process.env?.DOCKER_HOST_SOCKET || "/var/run/docker.sock").trim() || "/var/run/docker.sock";
-}
-async function currentDockerContainerID(socket, timeout) {
-    const candidates = [];
-    addDockerIDCandidate(candidates, process.env?.HOSTNAME);
-    for (const file of ["/proc/self/cgroup", "/proc/self/mountinfo"]) {
-        try {
-            const text = fs.readFileSync(file, "utf8");
-            for (const match of text.matchAll(/[0-9a-f]{64}/g))
-                addDockerIDCandidate(candidates, match[0]);
-            for (const match of text.matchAll(/(?:docker|containers)[-/]([0-9a-f]{12,64})/g))
-                addDockerIDCandidate(candidates, match[1]);
-        }
-        catch (_) { }
-    }
-    for (const candidate of candidates) {
-        try {
-            await dockerJSON(socket, "GET", `/containers/${encodeURIComponent(candidate)}/json`, undefined, timeout);
-            return candidate;
-        }
-        catch (_) { }
-    }
-    throw new Error("Docker 更新失败：无法识别当前容器 ID");
-}
-function addDockerIDCandidate(list, value) {
-    value = String(value || "").trim();
-    if (/^[0-9a-f]{12,64}$/i.test(value) && !list.includes(value))
-        list.push(value);
-}
-async function pullDockerImage(socket, image, timeout) {
-    const parsed = splitDockerImage(image);
-    const path = `/images/create?fromImage=${encodeURIComponent(parsed.name)}&tag=${encodeURIComponent(parsed.tag)}`;
-    const result = await dockerRequest(socket, "POST", path, undefined, timeout);
-    return result.body;
-}
-function splitDockerImage(image) {
-    image = String(image || "").trim();
-    const slash = image.lastIndexOf("/");
-    const colon = image.lastIndexOf(":");
-    if (colon > slash)
-        return { name: image.slice(0, colon), tag: image.slice(colon + 1) || "latest" };
-    return { name: image, tag: "latest" };
-}
-async function dockerJSON(socket, method, requestPath, body, timeout) {
-    const result = await dockerRequest(socket, method, requestPath, body, timeout);
-    if (!result.body.trim())
-        return {};
+async function fetchReleaseMetadata(options, timeout) {
+    const repo = String(options.releaseRepo || process.env?.SILLYGIRL_RELEASE_REPO || "smallfawn/sillyGirl").trim();
+    const tag = String(options.releaseTag || "").trim();
+    const apiPath = tag ? `releases/tags/${encodeURIComponent(tag)}` : "releases/latest";
+    const address = `https://api.github.com/repos/${repo}/${apiPath}`;
+    const text = await curlText(releaseDownloadURLs(address), timeout, ["-H", "Accept: application/vnd.github+json"]);
     try {
-        return JSON.parse(result.body);
+        return JSON.parse(text);
     }
     catch (_) {
-        throw new Error(`Docker API 返回非 JSON：${result.body.slice(0, 200)}`);
+        throw new Error(`GitHub Release 接口返回非 JSON：${text.slice(0, 200)}`);
     }
 }
-function dockerRequest(socket, method, requestPath, body, timeout) {
-    return new Promise((resolve, reject) => {
-        const payload = body === undefined ? undefined : JSON.stringify(body);
-        const req = http.request({
-            socketPath: socket,
-            method,
-            path: requestPath,
-            timeout: Math.max(10, Number(timeout || 120)) * 1000,
-            headers: payload ? {
-                "content-type": "application/json",
-                "content-length": Buffer.byteLength(payload),
-            } : undefined,
-        }, (res) => {
-            const chunks = [];
-            res.on("data", (chunk) => chunks.push(chunk));
-            res.on("end", () => {
-                const text = Buffer.concat(chunks).toString("utf8");
-                if (res.statusCode < 200 || res.statusCode >= 300) {
-                    reject(new Error(`Docker API ${method} ${requestPath} HTTP ${res.statusCode}: ${text.slice(0, 300)}`));
-                    return;
-                }
-                resolve({ status: res.statusCode, body: text });
-            });
-        });
-        req.on("timeout", () => req.destroy(new Error("Docker API 请求超时")));
-        req.on("error", reject);
-        if (payload)
-            req.write(payload);
-        req.end();
+function selectReleaseAsset(release, options) {
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const configured = String(options.releaseAsset || "").trim();
+    if (configured) {
+        return assets.find((asset) => asset.name === configured || String(asset.name || "").includes(configured));
+    }
+    const goos = releaseGOOS();
+    const goarch = releaseGOARCH();
+    const suffix = goos === "windows" ? ".zip" : ".tar.gz";
+    return assets.find((asset) => {
+        const name = String(asset.name || "");
+        return name.includes(`_${goos}_${goarch}`) && name.endsWith(suffix);
     });
 }
-function errorMessage(error) {
-    return String(error && error.message ? error.message : error || "").trim();
-}
-async function pullCommand(repo, remote, configuredBranch, timeout) {
-    const branch = String(configuredBranch || "").trim() || (await currentBranch(repo, timeout)) || "main";
-    if (configuredBranch)
-        return ["pull", "--ff-only", remote, branch];
-    try {
-        const upstream = await git(repo, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], timeout);
-        if (upstream.stdout.trim())
-            return ["pull", "--ff-only"];
-    }
-    catch (_) { }
-    return ["pull", "--ff-only", remote, branch];
-}
-async function currentBranch(repo, timeout) {
-    try {
-        const result = await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"], timeout);
-        const branch = result.stdout.trim();
-        return branch && branch !== "HEAD" ? branch : "";
-    }
-    catch (_) {
-        return "";
+function releaseGOOS() {
+    switch (process.platform) {
+        case "win32":
+            return "windows";
+        case "darwin":
+            return "darwin";
+        default:
+            return "linux";
     }
 }
-async function resolveSillyGirlRepo(configured, timeout) {
-    const candidates = [];
-    addRepoCandidate(candidates, configured);
-    addRepoCandidate(candidates, process.env?.SILLYGIRL_APP_DIR);
-    addRepoCandidate(candidates, process.env?.SILLYGIRL_HOME);
-    addRepoCandidate(candidates, process.env?.APP_HOME);
-    addRepoCandidate(candidates, process.cwd());
-    addRepoCandidate(candidates, path.resolve(process.cwd(), ".."));
-    addRepoCandidate(candidates, path.resolve(process.cwd(), "../.."));
-    addRepoCandidate(candidates, "/app");
-    addRepoCandidate(candidates, "/data/sillyGirl");
-    for (const candidate of candidates) {
-        try {
-            const result = await git(candidate, ["rev-parse", "--show-toplevel"], timeout);
-            const repo = result.stdout.trim();
-            if (repo && await isSillyGirlRepo(repo, timeout))
-                return repo;
+function releaseGOARCH() {
+    switch (process.arch) {
+        case "x64":
+            return "amd64";
+        case "arm64":
+            return "arm64";
+        default:
+            return process.arch;
+    }
+}
+function releaseExecutablePath(options) {
+    const configured = String(options.executablePath || process.env?.SILLYGIRL_EXEC_PATH || "").trim();
+    if (configured)
+        return path.resolve(configured);
+    if (process.platform === "win32")
+        return path.resolve(process.cwd(), "sillyGirl.exe");
+    return "/app/sillyGirl";
+}
+async function verifyReleaseChecksum(release, asset, archive, timeout) {
+    const checksums = (Array.isArray(release.assets) ? release.assets : []).find((item) => String(item.name || "").toLowerCase() === "checksums.txt");
+    if (!checksums?.browser_download_url)
+        throw new Error("Release 缺少 checksums.txt，拒绝更新");
+    const text = await curlText(releaseDownloadURLs(checksums.browser_download_url), timeout);
+    const expected = parseReleaseChecksum(text, asset.name);
+    if (!expected)
+        throw new Error(`checksums.txt 中缺少 ${asset.name} 的 SHA256`);
+    const actual = sha256File(archive);
+    if (actual.toLowerCase() !== expected.toLowerCase())
+        throw new Error(`Release 包校验失败：${asset.name}`);
+}
+function parseReleaseChecksum(text, fileName) {
+    for (const line of String(text || "").split(/\r?\n/)) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2 && parts[1].replace(/^\*/, "") === fileName && /^[a-f0-9]{64}$/i.test(parts[0]))
+            return parts[0];
+    }
+    return "";
+}
+function sha256File(file) {
+    const hash = crypto.createHash("sha256");
+    hash.update(fs.readFileSync(file));
+    return hash.digest("hex");
+}
+async function extractReleaseArchive(archive, tmpDir, timeout) {
+    await validateReleaseArchiveEntries(archive, timeout);
+    await runCommand("tar", ["-xf", archive, "-C", tmpDir], timeout);
+}
+async function validateReleaseArchiveEntries(archive, timeout) {
+    const result = await runCommand("tar", ["-tf", archive], timeout);
+    for (const entry of String(result.stdout || "").split(/\r?\n/)) {
+        const normalized = entry.trim().replace(/\\/g, "/");
+        if (!normalized)
+            continue;
+        if (normalized.startsWith("/") || normalized.includes(":") || normalized.split("/").includes("..")) {
+            throw new Error("Release 包包含非法路径，已拒绝解压");
         }
-        catch (_) { }
-    }
-    throw new Error("未找到可更新的 SillyGirl Git 仓库；Docker/Release 部署请使用镜像或 Release 包更新");
-}
-async function isSillyGirlRepo(repo, timeout) {
-    try {
-        const result = await git(repo, ["config", "--get", "remote.origin.url"], timeout);
-        const remote = result.stdout.trim().toLowerCase();
-        return remote.includes("sillygirl") && !remote.includes("sillygirl_plugins");
-    }
-    catch (_) {
-        return false;
     }
 }
-function addRepoCandidate(list, value) {
-    value = String(value || "").trim();
-    if (!value)
+async function installReleasePayload(tmpDir, executablePath) {
+    const binary = findReleaseBinary(tmpDir);
+    if (!binary)
+        throw new Error("Release 包中没有找到 sillyGirl 可执行文件");
+    const targetDir = path.dirname(executablePath);
+    fs.mkdirSync(targetDir, { recursive: true });
+    if (process.platform === "win32") {
+        const readyPath = executablePath.replace(/\.exe$/i, ".ready.exe");
+        fs.copyFileSync(binary, readyPath);
         return;
-    const normalized = path.resolve(value);
-    if (!list.includes(normalized))
-        list.push(normalized);
+    }
+    const tmpTarget = `${executablePath}.new-${Date.now()}`;
+    const backup = `${executablePath}.bak-${Date.now()}`;
+    fs.copyFileSync(binary, tmpTarget);
+    fs.chmodSync(tmpTarget, 0o755);
+    let backedUp = false;
+    try {
+        if (fs.existsSync(executablePath)) {
+            fs.renameSync(executablePath, backup);
+            backedUp = true;
+        }
+        fs.renameSync(tmpTarget, executablePath);
+        fs.rmSync(backup, { force: true });
+    }
+    catch (error) {
+        fs.rmSync(tmpTarget, { force: true });
+        if (backedUp && fs.existsSync(backup) && !fs.existsSync(executablePath))
+            fs.renameSync(backup, executablePath);
+        throw error;
+    }
+    const proto3 = findReleaseProto3(tmpDir);
+    if (proto3)
+        copyDir(proto3, path.join(targetDir, "proto3"));
 }
-function git(cwd, args, timeoutSeconds) {
+function findReleaseBinary(root) {
+    const suffix = process.platform === "win32" ? ".exe" : "";
+    return walkFiles(root).find((file) => {
+        const name = path.basename(file);
+        return name.startsWith("sillyGirl_") && (suffix ? name.endsWith(suffix) : !name.endsWith(".zip") && !name.endsWith(".tar.gz"));
+    });
+}
+function findReleaseProto3(root) {
+    const dirs = walkDirs(root);
+    return dirs.find((dir) => path.basename(dir) === "proto3" && fs.existsSync(path.join(dir, "sillygirl.js")));
+}
+function walkFiles(root) {
+    const out = [];
+    for (const item of fs.readdirSync(root, { withFileTypes: true })) {
+        const full = path.join(root, item.name);
+        if (item.isDirectory())
+            out.push(...walkFiles(full));
+        else if (item.isFile())
+            out.push(full);
+    }
+    return out;
+}
+function walkDirs(root) {
+    const out = [];
+    for (const item of fs.readdirSync(root, { withFileTypes: true })) {
+        const full = path.join(root, item.name);
+        if (item.isDirectory()) {
+            out.push(full, ...walkDirs(full));
+        }
+    }
+    return out;
+}
+function copyDir(source, target) {
+    fs.mkdirSync(target, { recursive: true });
+    for (const item of fs.readdirSync(source, { withFileTypes: true })) {
+        const src = path.join(source, item.name);
+        const dst = path.join(target, item.name);
+        if (item.isDirectory())
+            copyDir(src, dst);
+        else if (item.isFile())
+            fs.copyFileSync(src, dst);
+    }
+}
+async function curlText(urls, timeout, extraArgs = []) {
+    let lastErr;
+    for (const url of urls) {
+        try {
+            const result = await runCommand("curl", ["-fsSL", "--retry", "2", "--connect-timeout", "8", "--max-time", String(timeout), "-H", "User-Agent: sillyGirl", ...extraArgs, url], timeout);
+            return result.stdout;
+        }
+        catch (error) {
+            lastErr = error;
+        }
+    }
+    throw lastErr || new Error("curl 请求失败");
+}
+async function curlDownload(urls, target, timeout) {
+    let lastErr;
+    for (const url of urls) {
+        try {
+            await runCommand("curl", ["-fL", "--retry", "2", "--connect-timeout", "8", "--max-time", String(timeout), "-H", "User-Agent: sillyGirl", "-o", target, url], timeout);
+            return;
+        }
+        catch (error) {
+            lastErr = error;
+        }
+    }
+    throw lastErr || new Error("curl 下载失败");
+}
+function releaseDownloadURLs(address) {
+    const urls = [];
+    for (const prefix of releaseGithubProxyPrefixes()) {
+        urls.push(`${prefix.replace(/\/+$/, "")}/${address}`);
+    }
+    urls.push(address);
+    return [...new Set(urls)];
+}
+function releaseGithubProxyPrefixes() {
+    const configured = String(process.env?.SILLYGIRL_GITHUB_PROXY || "").trim();
+    const values = configured ? [configured] : [];
+    return values.concat([
+        "https://gh-proxy.org",
+        "https://ghproxy.net",
+        "https://cdn.gh-proxy.org",
+    ]);
+}
+function safeFileName(name) {
+    return String(name || "release").replace(/[\\/:*?"<>|]/g, "_");
+}
+function normalizeVersionText(value) {
+    return String(value || "").trim().replace(/^refs\/tags\//, "").replace(/^[vV]/, "");
+}
+function runCommand(command, args, timeoutSeconds) {
     return new Promise((resolve, reject) => {
-        execFile("git", args, {
-            cwd,
+        execFile(command, args, {
             timeout: Math.max(10, Number(timeoutSeconds || 120)) * 1000,
             windowsHide: true,
             maxBuffer: 1024 * 1024,
@@ -1514,12 +1540,6 @@ function clampNumber(value, min, max) {
     if (!Number.isFinite(value))
         return min;
     return Math.max(min, Math.min(max, Math.floor(value)));
-}
-function compactRuntimeOutput(value) {
-    const text = String(value || "").trim();
-    if (!text)
-        return "";
-    return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(-8).join("\n").slice(0, 1000);
 }
 class Console {
     error = (message, ...optionalParams) => { };

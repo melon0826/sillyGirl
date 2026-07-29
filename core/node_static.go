@@ -27,7 +27,7 @@ func remStatic(uuid string) {
 
 func FindFile(c *gin.Context) {
 	// 获取文件名
-	filename := c.Param("filename")
+	filename := strings.TrimPrefix(c.Param("filename"), "/")
 
 	served := false
 	statics.Range(func(_, value any) bool {
@@ -100,9 +100,6 @@ func isStaticChildPath(root, target string) bool {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(target))
 	return err == nil && rel != "." && !filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
-
-// Server.GET("/api/file/:filename", FindFile)
-// 	Server.GET("/api/decode/:random", Base642Binary)
 
 func Base642Binary(c *gin.Context) {
 	random := c.Param("random")

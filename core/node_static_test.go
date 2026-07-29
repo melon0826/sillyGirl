@@ -102,6 +102,33 @@ func TestFindFileServesChildFile(t *testing.T) {
 	}
 }
 
+func TestFindFileRouteServesNestedAsset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "app.js"), []byte("console.log('route');"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	uuid := strings.ReplaceAll(t.Name(), "/", "-")
+	addStatic(uuid, root)
+	defer remStatic(uuid)
+
+	router := gin.New()
+	router.GET("/api/file/*filename", FindFile)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/file/assets/app.js", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("nested static route status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if body := w.Body.String(); body != "console.log('route');" {
+		t.Fatalf("nested static route body = %q", body)
+	}
+}
+
 func TestSafeEmbeddedFileNameRejectsTraversal(t *testing.T) {
 	cases := []string{
 		"admin/assets/../index.html",

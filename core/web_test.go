@@ -24,3 +24,12 @@ func TestNormalizeHTTPPort(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalHTTPPortValue(t *testing.T) {
+	for _, value := range []string{"8080", "d:8080", "f:8080.000000"} {
+		port, stored := canonicalHTTPPortValue(value)
+		if port != 8080 || stored != "8080" {
+			t.Fatalf("canonicalHTTPPortValue(%q) = (%d, %q), want (8080, 8080)", value, port, stored)
+		}
+	}
+}

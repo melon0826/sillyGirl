@@ -1,15 +1,21 @@
 import asyncio
 import base64
+import hashlib
 import inspect
 import json
 import os
 import pickle
+import platform
 import re
+import shutil
 import subprocess
+import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 import grpc
 
@@ -1036,13 +1042,6 @@ async def restart():
     return await Bucket("sillyGirl").set("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
 
 
-def _compact_runtime_output(value):
-    text = str(value or "").strip()
-    if len(text) > 2000:
-        return text[:2000] + "..."
-    return text
-
-
 def _run_process(cwd, args, timeout=120):
     proc = subprocess.run(
         args,
@@ -1061,98 +1060,283 @@ def _run_process(cwd, args, timeout=120):
     }
 
 
-def _add_repo_candidate(candidates, value):
-    path = str(value or "").strip()
-    if not path:
-        return
-    path = os.path.abspath(path)
-    if path not in candidates:
-        candidates.append(path)
+def _curl_text(urls, timeout=120, extra_args=None):
+    last_error = None
+    for url in urls:
+        try:
+            result = _run_process(
+                None,
+                [
+                    "curl",
+                    "-fsSL",
+                    "--retry",
+                    "2",
+                    "--connect-timeout",
+                    "8",
+                    "--max-time",
+                    str(timeout),
+                    "-H",
+                    "User-Agent: sillyGirl",
+                    *(extra_args or []),
+                    url,
+                ],
+                timeout,
+            )
+            return result["stdout"]
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(str(last_error or "curl 请求失败"))
 
 
-def _is_sillygirl_repo(path, timeout):
-    if not os.path.isdir(path):
-        return False
+def _curl_download(urls, target, timeout=120):
+    last_error = None
+    for url in urls:
+        try:
+            _run_process(
+                None,
+                [
+                    "curl",
+                    "-fL",
+                    "--retry",
+                    "2",
+                    "--connect-timeout",
+                    "8",
+                    "--max-time",
+                    str(timeout),
+                    "-H",
+                    "User-Agent: sillyGirl",
+                    "-o",
+                    target,
+                    url,
+                ],
+                timeout,
+            )
+            return
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(str(last_error or "curl 下载失败"))
+
+
+def _release_proxy_prefixes():
+    configured = str(os.environ.get("SILLYGIRL_GITHUB_PROXY") or "").strip()
+    values = [configured] if configured else []
+    values.extend(["https://gh-proxy.org", "https://ghproxy.net", "https://cdn.gh-proxy.org"])
+    return values
+
+
+def _release_download_urls(address):
+    urls = [f"{prefix.rstrip('/')}/{address}" for prefix in _release_proxy_prefixes()]
+    urls.append(address)
+    return list(dict.fromkeys(urls))
+
+
+def _fetch_release_metadata(options, timeout):
+    repo = str(options.get("releaseRepo") or os.environ.get("SILLYGIRL_RELEASE_REPO") or "smallfawn/sillyGirl").strip()
+    tag = str(options.get("releaseTag") or "").strip()
+    api_path = f"releases/tags/{urllib.parse.quote(tag, safe='')}" if tag else "releases/latest"
+    url = f"https://api.github.com/repos/{repo}/{api_path}"
+    text = _curl_text(_release_download_urls(url), timeout, ["-H", "Accept: application/vnd.github+json"])
     try:
-        _run_process(path, ["git", "rev-parse", "--is-inside-work-tree"], timeout)
-        remote = _run_process(path, ["git", "config", "--get", "remote.origin.url"], timeout)["stdout"]
-        remote = remote.strip().lower()
-        return "sillygirl" in remote and "sillygirl_plugins" not in remote and "sillygirl-plugins" not in remote
+        return json.loads(text)
+    except Exception as exc:
+        raise RuntimeError(f"GitHub Release 接口返回非 JSON：{text[:200]}") from exc
+
+
+def _release_goos():
+    if os.name == "nt":
+        return "windows"
+    if sys_platform := os.environ.get("SILLYGIRL_RUNTIME_GOOS"):
+        return sys_platform
+    if os.uname().sysname.lower() == "darwin":
+        return "darwin"
+    return "linux"
+
+
+def _release_goarch():
+    machine = (os.environ.get("SILLYGIRL_RUNTIME_GOARCH") or platform.machine()).lower()
+    if machine in ("x86_64", "amd64"):
+        return "amd64"
+    if machine in ("aarch64", "arm64"):
+        return "arm64"
+    return machine
+
+
+def _select_release_asset(release, options):
+    assets = release.get("assets") if isinstance(release, dict) else []
+    assets = assets if isinstance(assets, list) else []
+    configured = str(options.get("releaseAsset") or "").strip()
+    if configured:
+        return next((item for item in assets if item.get("name") == configured or configured in str(item.get("name") or "")), None)
+    goos = _release_goos()
+    goarch = _release_goarch()
+    suffix = ".zip" if goos == "windows" else ".tar.gz"
+    return next((item for item in assets if f"_{goos}_{goarch}" in str(item.get("name") or "") and str(item.get("name") or "").endswith(suffix)), None)
+
+
+def _parse_release_checksum(text, file_name):
+    for line in str(text or "").splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[1].lstrip("*") == file_name and re.match(r"^[a-fA-F0-9]{64}$", parts[0]):
+            return parts[0]
+    return ""
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_release_checksum(release, asset, archive, timeout):
+    assets = release.get("assets") if isinstance(release, dict) else []
+    assets = assets if isinstance(assets, list) else []
+    checksums = next((item for item in assets if str(item.get("name") or "").lower() == "checksums.txt"), None)
+    if not checksums or not checksums.get("browser_download_url"):
+        raise RuntimeError("Release 缺少 checksums.txt，拒绝更新")
+    text = _curl_text(_release_download_urls(checksums["browser_download_url"]), timeout)
+    expected = _parse_release_checksum(text, asset.get("name") or "")
+    if not expected:
+        raise RuntimeError(f"checksums.txt 中缺少 {asset.get('name')} 的 SHA256")
+    actual = _sha256_file(archive)
+    if actual.lower() != expected.lower():
+        raise RuntimeError(f"Release 包校验失败：{asset.get('name')}")
+
+
+def _safe_extract_tar(archive, target):
+    target_abs = os.path.abspath(target)
+    with tarfile.open(archive) as package:
+        for member in package.getmembers():
+            member_path = os.path.abspath(os.path.join(target, member.name))
+            if member_path != target_abs and not member_path.startswith(target_abs + os.sep):
+                raise RuntimeError("Release 包包含非法路径，已拒绝解压")
+        package.extractall(target)
+
+
+def _safe_extract_zip(archive, target):
+    target_abs = os.path.abspath(target)
+    with zipfile.ZipFile(archive) as package:
+        for member in package.namelist():
+            member_path = os.path.abspath(os.path.join(target, member))
+            if member_path != target_abs and not member_path.startswith(target_abs + os.sep):
+                raise RuntimeError("Release 包包含非法路径，已拒绝解压")
+        package.extractall(target)
+
+
+def _extract_release_archive(archive, target):
+    if str(archive).lower().endswith(".zip"):
+        _safe_extract_zip(archive, target)
+        return
+    _safe_extract_tar(archive, target)
+
+
+def _walk_files(root):
+    for base, _dirs, files in os.walk(root):
+        for name in files:
+            yield os.path.join(base, name)
+
+
+def _find_release_binary(root):
+    suffix = ".exe" if os.name == "nt" else ""
+    for file in _walk_files(root):
+        name = os.path.basename(file)
+        if name.startswith("sillyGirl_") and (name.endswith(suffix) if suffix else not name.endswith((".zip", ".tar.gz"))):
+            return file
+    return ""
+
+
+def _find_release_proto3(root):
+    for base, dirs, _files in os.walk(root):
+        for name in dirs:
+            candidate = os.path.join(base, name)
+            if name == "proto3" and os.path.exists(os.path.join(candidate, "sillygirl.py")):
+                return candidate
+    return ""
+
+
+def _release_executable_path(options):
+    configured = str(options.get("executablePath") or os.environ.get("SILLYGIRL_EXEC_PATH") or "").strip()
+    if configured:
+        return os.path.abspath(configured)
+    if os.name == "nt":
+        return os.path.abspath(os.path.join(os.getcwd(), "sillyGirl.exe"))
+    return "/app/sillyGirl"
+
+
+def _install_release_payload(tmp_dir, executable_path):
+    binary = _find_release_binary(tmp_dir)
+    if not binary:
+        raise RuntimeError("Release 包中没有找到 sillyGirl 可执行文件")
+    target_dir = os.path.dirname(executable_path)
+    os.makedirs(target_dir, exist_ok=True)
+    if os.name == "nt":
+        ready_path = re.sub(r"\.exe$", ".ready.exe", executable_path, flags=re.I)
+        shutil.copyfile(binary, ready_path)
+        return
+    tmp_target = f"{executable_path}.new-{int(time.time())}"
+    backup = f"{executable_path}.bak-{int(time.time())}"
+    shutil.copyfile(binary, tmp_target)
+    os.chmod(tmp_target, 0o755)
+    backed_up = False
+    try:
+        if os.path.exists(executable_path):
+            os.rename(executable_path, backup)
+            backed_up = True
+        os.rename(tmp_target, executable_path)
+        if os.path.exists(backup):
+            os.remove(backup)
     except Exception:
-        return False
+        if os.path.exists(tmp_target):
+            os.remove(tmp_target)
+        if backed_up and os.path.exists(backup) and not os.path.exists(executable_path):
+            os.rename(backup, executable_path)
+        raise
+    proto3 = _find_release_proto3(tmp_dir)
+    if proto3:
+        target_proto3 = os.path.join(target_dir, "proto3")
+        if os.path.exists(target_proto3):
+            shutil.rmtree(target_proto3)
+        shutil.copytree(proto3, target_proto3)
 
 
-def _resolve_sillygirl_repo(configured=None, timeout=120):
-    candidates = []
-    _add_repo_candidate(candidates, configured)
-    for env_key in ("SILLYGIRL_APP_DIR", "APP_HOME", "HOME"):
-        _add_repo_candidate(candidates, os.environ.get(env_key))
-    _add_repo_candidate(candidates, os.getcwd())
-    _add_repo_candidate(candidates, "/app")
-    _add_repo_candidate(candidates, "/data/sillyGirl")
-
-    for path in list(candidates):
-        parent = os.path.abspath(os.path.join(path, os.pardir))
-        _add_repo_candidate(candidates, parent)
-
-    for path in candidates:
-        if _is_sillygirl_repo(path, timeout):
-            return path
-    raise RuntimeError("未找到可更新的 SillyGirl Git 仓库")
-
-
-def _current_branch(repo, timeout):
-    branch = _run_process(repo, ["git", "rev-parse", "--abbrev-ref", "HEAD"], timeout)["stdout"].strip()
-    if not branch or branch == "HEAD":
-        raise RuntimeError("当前仓库处于 detached HEAD，请显式指定 branch")
-    return branch
-
-
-def _pull_args(repo, remote="origin", branch=None, timeout=120):
-    remote = str(remote or "origin").strip() or "origin"
-    branch = str(branch or "").strip() or _current_branch(repo, timeout)
-    upstream = f"{remote}/{branch}"
-    _run_process(repo, ["git", "rev-parse", "--verify", upstream], timeout)
-    return ["git", "pull", "--ff-only", remote, branch]
+def _normalize_version_text(value):
+    return re.sub(r"^[vV]", "", str(value or "").strip().replace("refs/tags/", ""))
 
 
 async def update(options=None):
     try:
         options = options or {}
-        if isinstance(options, str):
-            options = {"appDir": options}
         if not isinstance(options, dict):
-            raise RuntimeError("update options 必须是 dict 或 appDir 字符串")
+            raise RuntimeError("update options 必须是 dict")
         timeout = max(10, min(int(options.get("timeout") or 120), 600))
-        remote = str(options.get("gitRemote") or "origin").strip() or "origin"
-        repo = await asyncio.to_thread(_resolve_sillygirl_repo, options.get("appDir"), timeout)
-        before = (
-            await asyncio.to_thread(_run_process, repo, ["git", "rev-parse", "--short", "HEAD"], timeout)
-        )["stdout"].strip()
-        await asyncio.to_thread(_run_process, repo, ["git", "fetch", remote, "--prune"], timeout)
-        pull_args = await asyncio.to_thread(_pull_args, repo, remote, options.get("gitBranch"), timeout)
-        pull = await asyncio.to_thread(
-            _run_process,
-            repo,
-            pull_args,
-            timeout,
-        )
-        after = (
-            await asyncio.to_thread(_run_process, repo, ["git", "rev-parse", "--short", "HEAD"], timeout)
-        )["stdout"].strip()
-        restarted = bool(options.get("restart"))
+        before = os.environ.get("SILLYGIRL_VERSION") or "unknown"
+        release = await asyncio.to_thread(_fetch_release_metadata, options, timeout)
+        asset = _select_release_asset(release, options)
+        if not asset:
+            raise RuntimeError(f"未找到适配当前系统的 Release 包：{release.get('tag_name') or release.get('name') or 'latest'}")
+        tmp_dir = tempfile.mkdtemp(prefix="sillygirl-update-")
+        archive = os.path.join(tmp_dir, re.sub(r'[\\/:*?"<>|]', "_", asset.get("name") or "sillyGirl-release"))
+        try:
+            await asyncio.to_thread(_curl_download, _release_download_urls(asset.get("browser_download_url")), archive, timeout)
+            await asyncio.to_thread(_verify_release_checksum, release, asset, archive, timeout)
+            await asyncio.to_thread(_extract_release_archive, archive, tmp_dir)
+            await asyncio.to_thread(_install_release_payload, tmp_dir, _release_executable_path(options))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        restarted = options.get("restart") is not False
         if restarted:
             await restart()
         return {
             "status": True,
             "message": "更新完成",
             "data": {
-                "mode": "git",
-                "repo": repo,
+                "mode": "release",
+                "repo": release.get("html_url") or f"release:{release.get('tag_name') or ''}",
                 "before": before,
-                "after": after,
-                "changed": before != after,
-                "output": _compact_runtime_output(pull.get("stdout") or pull.get("stderr")),
+                "after": _normalize_version_text(release.get("tag_name") or release.get("name") or ""),
+                "changed": True,
+                "output": f"已通过 curl 下载并安装 Release 包：{asset.get('name')}。",
                 "restarted": restarted,
             },
         }
