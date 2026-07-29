@@ -23,6 +23,7 @@ import message from 'ant-design-vue/es/message';
 import Modal from 'ant-design-vue/es/modal';
 import Pagination from 'ant-design-vue/es/pagination';
 import Popconfirm from 'ant-design-vue/es/popconfirm';
+import Progress from 'ant-design-vue/es/progress';
 import Row from 'ant-design-vue/es/row';
 import Segmented from 'ant-design-vue/es/segmented';
 import Select from 'ant-design-vue/es/select';
@@ -192,8 +193,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.2.6',
-    remote: info.remote || info.local || '0.2.6',
+    local: info.local || '0.2.7',
+    remote: info.remote || info.local || '0.2.7',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -202,6 +203,146 @@ const overviewUserStats = computed(() => ({
   total: user.value?.user_stats?.total || 0,
   today: user.value?.user_stats?.today || 0,
 }));
+
+type SystemUpdateResult = {
+  mode?: string;
+  repo?: string;
+  before?: string;
+  after?: string;
+  changed?: boolean;
+  asset?: string;
+  output?: string;
+};
+
+type SystemUpdateSnapshot = {
+  running?: boolean;
+  status?: 'idle' | 'running' | 'done' | 'error';
+  percent?: number;
+  message?: string;
+  error?: string;
+  result?: SystemUpdateResult | null;
+};
+
+const systemUpdate = reactive({
+  open: false,
+  running: false,
+  restarting: false,
+  restartChecking: false,
+  percent: 0,
+  status: 'idle' as 'idle' | 'running' | 'done' | 'error',
+  message: '',
+  result: null as SystemUpdateResult | null,
+  timer: 0,
+  restartTimer: 0,
+});
+
+function applySystemUpdateSnapshot(snapshot: SystemUpdateSnapshot) {
+  systemUpdate.running = !!snapshot.running;
+  systemUpdate.status = snapshot.status || (snapshot.running ? 'running' : 'idle');
+  systemUpdate.percent = Math.max(0, Math.min(100, Number(snapshot.percent || 0)));
+  systemUpdate.message = snapshot.error || snapshot.message || '';
+  systemUpdate.result = snapshot.result || null;
+  if (!systemUpdate.running) {
+    window.clearInterval(systemUpdate.timer);
+  }
+}
+
+async function startOnlineUpdate() {
+  if (systemUpdate.running) return;
+  systemUpdate.open = true;
+  systemUpdate.running = true;
+  systemUpdate.restarting = false;
+  systemUpdate.status = 'running';
+  systemUpdate.percent = 6;
+  systemUpdate.result = null;
+  systemUpdate.message = '正在连接 GitHub Release';
+  window.clearInterval(systemUpdate.timer);
+  try {
+    const res = await post<ApiEnvelope<SystemUpdateSnapshot>>('/api/admin/system/update', {});
+    applySystemUpdateSnapshot(apiData(res));
+    systemUpdate.timer = window.setInterval(() => {
+      pollSystemUpdateStatus().catch((error) => {
+        systemUpdate.status = 'error';
+        systemUpdate.message = error instanceof Error ? error.message : '读取更新状态失败';
+        systemUpdate.running = false;
+        window.clearInterval(systemUpdate.timer);
+      });
+    }, 1000);
+    await pollSystemUpdateStatus();
+  } catch (error) {
+    systemUpdate.status = 'error';
+    systemUpdate.running = false;
+    systemUpdate.message = error instanceof Error ? error.message : '更新失败';
+    message.error(systemUpdate.message);
+    window.clearInterval(systemUpdate.timer);
+  }
+}
+
+async function pollSystemUpdateStatus() {
+  const res = await get<ApiEnvelope<SystemUpdateSnapshot>>('/api/admin/system/update/status');
+  const snapshot = apiData(res);
+  applySystemUpdateSnapshot(snapshot);
+  if (snapshot.status === 'done') {
+    await loadUser(false);
+  }
+}
+
+async function restartAfterUpdate() {
+  systemUpdate.restarting = true;
+  systemUpdate.restartChecking = false;
+  try {
+    await post('/api/admin/system/restart', {});
+    systemUpdate.restarting = false;
+    systemUpdate.restartChecking = true;
+    systemUpdate.status = 'running';
+    systemUpdate.percent = 0;
+    systemUpdate.message = '重启已触发，正在等待服务恢复';
+    await waitForRestartReady();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '重启失败');
+    systemUpdate.restartChecking = false;
+    systemUpdate.status = 'error';
+    systemUpdate.message = error instanceof Error ? error.message : '重启失败';
+  } finally {
+    systemUpdate.restarting = false;
+  }
+}
+
+async function waitForRestartReady() {
+  window.clearInterval(systemUpdate.restartTimer);
+  const startedAt = Date.now();
+  let attempts = 0;
+  return new Promise<void>((resolve) => {
+    systemUpdate.restartTimer = window.setInterval(async () => {
+      attempts += 1;
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      systemUpdate.percent = Math.min(95, 10 + attempts * 5);
+      systemUpdate.message = `正在等待服务恢复，已等待 ${elapsed} 秒`;
+      try {
+        const res = await fetch(`/api/health?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const body = await res.json().catch(() => null);
+        if (!body || body.status === false) return;
+        window.clearInterval(systemUpdate.restartTimer);
+        systemUpdate.restartChecking = false;
+        systemUpdate.status = 'done';
+        systemUpdate.percent = 100;
+        systemUpdate.message = '重启成功，服务已恢复';
+        message.success('重启成功');
+        await loadUser(false).catch(() => undefined);
+        resolve();
+      } catch (_) {
+        if (elapsed >= 180) {
+          window.clearInterval(systemUpdate.restartTimer);
+          systemUpdate.restartChecking = false;
+          systemUpdate.status = 'error';
+          systemUpdate.message = '重启等待超时，请手动刷新页面确认服务状态';
+          resolve();
+        }
+      }
+    }, 1000);
+  });
+}
 
 const menuItems = [
   { key: 'welcome', label: '概览', icon: () => h(Home, { size: 16 }) },
@@ -619,6 +760,8 @@ watch(
 onBeforeUnmount(() => {
   destroyScriptEditor();
   clearClawbotLoginPoll();
+  window.clearInterval(systemUpdate.timer);
+  window.clearInterval(systemUpdate.restartTimer);
 });
 
 const storageState = reactive({
@@ -2075,6 +2218,10 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Tag color="blue">当前版本 {{ overviewVersion.local }}</Tag>
                 <Tag color="green">最新版本 {{ overviewVersion.remote }}</Tag>
                 <Typography.Link :href="overviewVersion.repository" target="_blank">GitHub</Typography.Link>
+                <Button type="primary" size="small" :loading="systemUpdate.running" @click="startOnlineUpdate">
+                  <template #icon><CloudDownload :size="15" /></template>
+                  在线更新
+                </Button>
               </Space>
               <Row :gutter="[12, 12]">
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="脚本数量" :value="realScripts.length" /></Card></Col>
@@ -2921,6 +3068,38 @@ function smallcatOpenids(record?: AdminUserRow) {
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
         </Drawer>
       </Layout>
+
+      <Modal
+        v-model:open="systemUpdate.open"
+        title="在线更新"
+        :footer="null"
+        :closable="!systemUpdate.running && !systemUpdate.restartChecking"
+        :mask-closable="!systemUpdate.running && !systemUpdate.restartChecking"
+      >
+        <Space direction="vertical" style="width: 100%" size="middle">
+          <Progress
+            :percent="systemUpdate.percent"
+            :status="systemUpdate.status === 'error' ? 'exception' : systemUpdate.status === 'done' ? 'success' : 'active'"
+          />
+          <Alert
+            :type="systemUpdate.status === 'error' ? 'error' : systemUpdate.status === 'done' ? 'success' : 'info'"
+            :message="systemUpdate.message || '准备更新'"
+            show-icon
+          />
+          <div v-if="systemUpdate.result" class="update-result">
+            <Typography.Text class="block">版本：{{ systemUpdate.result.before || '-' }} -> {{ systemUpdate.result.after || '-' }}</Typography.Text>
+            <Typography.Text class="block">文件：{{ systemUpdate.result.asset || '-' }}</Typography.Text>
+            <Typography.Text class="block muted">{{ systemUpdate.result.output || '' }}</Typography.Text>
+          </div>
+          <Space v-if="systemUpdate.status === 'done' && !systemUpdate.restartChecking" style="justify-content: flex-end; width: 100%">
+            <Button @click="systemUpdate.open = false">关闭</Button>
+            <Button v-if="systemUpdate.result" type="primary" :loading="systemUpdate.restarting" @click="restartAfterUpdate">立即重启</Button>
+          </Space>
+          <Space v-if="systemUpdate.status === 'error'" style="justify-content: flex-end; width: 100%">
+            <Button @click="systemUpdate.open = false">关闭</Button>
+          </Space>
+        </Space>
+      </Modal>
 
       <Modal
         v-model:open="scriptCreateState.open"

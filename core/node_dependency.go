@@ -128,6 +128,7 @@ var nodeCommandCache = struct {
 	sync.Mutex
 	bin string
 }{}
+var nodeRuntimeNodePathCache sync.Map
 
 func init() {
 	GinApi(GET, "/api/admin/plugin/dependencies", RequireAuth, handlePluginDependencies)
@@ -2088,7 +2089,13 @@ func nodeRuntimeDependenciesInstalled(dir string) bool {
 }
 
 func nodeRuntimeNodePath() string {
-	return strings.Join(nodeRuntimeModulePaths(), string(os.PathListSeparator))
+	key := os.Getenv("SILLYGIRL_NODE_PATH") + "\x00" + os.Getenv("NODE_PATH")
+	if value, ok := nodeRuntimeNodePathCache.Load(key); ok {
+		return value.(string)
+	}
+	value := strings.Join(nodeRuntimeModulePaths(), string(os.PathListSeparator))
+	nodeRuntimeNodePathCache.Store(key, value)
+	return value
 }
 
 func nodeRuntimeModulePaths() []string {

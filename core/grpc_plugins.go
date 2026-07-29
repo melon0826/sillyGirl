@@ -24,6 +24,7 @@ func init() {
 }
 
 var processes sync.Map
+var nodePluginSourceHashCache sync.Map
 
 func initNodePlugins() {
 	root := strings.ReplaceAll(nodePluginsRoot(), "\\", "/")
@@ -167,29 +168,11 @@ func addNodePluginLocked(path, name, class string) error {
 		return nil
 	}
 	uuid := nameUuid(name)
-	//移除
-	var rf *common.Function
-	for i := range Functions {
-		if Functions[i].UUID == uuid {
-			rf = Functions[i]
-			DestroyAdapterByUUID(uuid)
-			Functions[i].Running = false
-			if len(Functions[i].CronIds) != 0 {
-				for _, id := range Functions[i].CronIds {
-					CRON.Remove(cron.EntryID(id))
-				}
-			}
-			Functions = append(Functions[:i], Functions[i+1:]...)
-			CancelPluginCrons(uuid)
-			CancelPluginWebs(uuid)
-			CancelPluginlistening(uuid)
-			remStatic(uuid)
-			storage.DisableHandle(uuid)
-			break
-		}
-	}
+	cleanPath := filepath.Clean(path)
 	file, err := os.Open(path)
 	if err != nil {
+		rf := unloadNodePluginLocked(uuid)
+		nodePluginSourceHashCache.Delete(cleanPath)
 		if rf != nil {
 			console.Log("已卸载 %s%s", rf.Title, rf.Suffix)
 		}
@@ -201,9 +184,20 @@ func addNodePluginLocked(path, name, class string) error {
 		return err
 	}
 	script := string(data)
+	hash := fmt.Sprintf("%x", sha1.Sum(data))
+	if loaded := loadedNodePluginLocked(uuid); loaded != nil && samePath(loaded.Path, cleanPath) {
+		if cached, ok := nodePluginSourceHashCache.Load(cleanPath); ok && cached == hash {
+			return nil
+		}
+	}
+	//移除
+	var rf *common.Function
 	if script == "" {
+		rf = unloadNodePluginLocked(uuid)
+		nodePluginSourceHashCache.Delete(cleanPath)
 		return nil
 	}
+	rf = unloadNodePluginLocked(uuid)
 	// plugins_id.Store(uuid, path)
 	// fmt.Println("add,", uuid, name)
 	f, cbs := pluginParse(script, uuid)
@@ -280,11 +274,7 @@ func addNodePluginLocked(path, name, class string) error {
 				console.Error("Python sillygirl 运行时依赖安装失败：%v", err)
 				return nil
 			}
-			cmd.Env = append(cmd.Env,
-				"PYTHONPATH="+pythonPluginPathEnv(pythonPath),
-				"PYTHONDONTWRITEBYTECODE=1",
-				"PYTHONUNBUFFERED=1",
-			)
+			cmd.Env = append(cmd.Env, pythonRuntimeEnvVars(pythonPath)...)
 		}
 
 		cmd.Dir = workDir
@@ -419,6 +409,40 @@ func addNodePluginLocked(path, name, class string) error {
 		}
 	}
 	AddCommand([]*common.Function{f})
+	nodePluginSourceHashCache.Store(cleanPath, hash)
+	return nil
+}
+
+func loadedNodePluginLocked(uuid string) *common.Function {
+	for _, f := range Functions {
+		if f != nil && f.UUID == uuid {
+			return f
+		}
+	}
+	return nil
+}
+
+func unloadNodePluginLocked(uuid string) *common.Function {
+	for i := range Functions {
+		if Functions[i].UUID != uuid {
+			continue
+		}
+		rf := Functions[i]
+		DestroyAdapterByUUID(uuid)
+		rf.Running = false
+		if len(rf.CronIds) != 0 {
+			for _, id := range rf.CronIds {
+				CRON.Remove(cron.EntryID(id))
+			}
+		}
+		Functions = append(Functions[:i], Functions[i+1:]...)
+		CancelPluginCrons(uuid)
+		CancelPluginWebs(uuid)
+		CancelPluginlistening(uuid)
+		remStatic(uuid)
+		storage.DisableHandle(uuid)
+		return rf
+	}
 	return nil
 }
 

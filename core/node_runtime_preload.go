@@ -12,12 +12,12 @@ var nodeRuntimePreloadCache sync.Map
 
 func ensureNodeRuntimePreload() (string, error) {
 	dir := filepath.Join(utils.ExecPath, "language", "node")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
-	}
 	path := filepath.Join(dir, "sillygirl-runtime-preload.js")
 	if _, ok := nodeRuntimePreloadCache.Load(path); ok {
 		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
 	}
 	if err := writeFileIfChanged(path, []byte(nodeRuntimePreloadScript), 0644); err != nil {
 		return "", err
