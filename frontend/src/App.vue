@@ -193,8 +193,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '0.2.8',
-    remote: info.remote || info.local || '0.2.8',
+    local: info.local || '1.0.0',
+    remote: info.remote || info.local || '1.0.0',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };

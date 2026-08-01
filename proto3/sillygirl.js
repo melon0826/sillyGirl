@@ -883,6 +883,9 @@ class SmallCat {
             throw new Error("smallcat 接口返回非 JSON：" + String(text || "").slice(0, 120));
         }
     }
+    post(path, options) {
+        return this.request("POST", path, Object.assign({}, options || {}));
+    }
     createQr(type) {
         const body = typeof type === "object" && type !== null ? type : { type };
         return this.request("POST", "/api/qr/start", body);
@@ -891,30 +894,85 @@ class SmallCat {
         return this.request("GET", "/api/qr/status", undefined, { uuid });
     }
     addUser(options) {
-        return this.request("POST", "/api/accounts/add", options || {});
+        return this.post("/api/accounts/add", options);
+    }
+    rescanUser(options) {
+        return this.post("/api/accounts/rescan", options);
     }
     userList() {
         return this.request("GET", "/api/accounts");
     }
+    checkUsers(options) {
+        return this.post("/api/accounts/status", options);
+    }
+    setUserRemark(options) {
+        return this.post("/api/accounts/remark", options);
+    }
+    setUserDisabled(options) {
+        return this.post("/api/accounts/disable", options);
+    }
+    deleteUser(options) {
+        return this.post("/api/accounts/delete", options);
+    }
+    proxyList() {
+        return this.request("GET", "/api/proxies");
+    }
+    testProxy(options) {
+        return this.post("/api/proxies/test", options);
+    }
+    addProxy(options) {
+        return this.post("/api/proxies/add", options);
+    }
+    deleteProxy(options) {
+        return this.post("/api/proxies/delete", options);
+    }
+    creditBalance() {
+        return this.request("GET", "/credits/balance");
+    }
+    creditLedger(query = { limit: 50 }) {
+        return this.request("GET", "/credits/ledger", undefined, typeof query === "number" ? { limit: query } : query);
+    }
     getCode(options) {
-        const body = Object.assign({}, options || {});
-        return this.request("POST", "/wx/code", body);
+        return this.post("/wx/code", options);
+    }
+    getSession(options) {
+        return this.post("/wx/getsession", options);
+    }
+    refreshSession(options) {
+        return this.post("/wx/refresh", options);
     }
     getUserInfo(options) {
-        const body = Object.assign({}, options || {});
-        return this.request("POST", "/wx/getuserinfo", body);
+        return this.post("/wx/getuserinfo", options);
+    }
+    getEncryptKey(options) {
+        return this.post("/wx/encryptkey", options);
     }
     getPhoneNumber(options) {
-        const body = Object.assign({}, options || {});
-        return this.request("POST", "/wx/getphonenumber", body);
+        return this.post("/wx/getphonenumber", options);
+    }
+    cloud(options) {
+        return this.post("/wx/cloud", options);
+    }
+    gateway(options) {
+        return this.post("/wx/gateway", options);
     }
     qrCodeAuth(options) {
-        const body = Object.assign({}, options || {});
-        return this.request("POST", "/wx/qrcodeauth", body);
+        return this.post("/wx/qrcodeauth", options);
     }
     oAuth(options) {
-        const body = Object.assign({}, options || {});
-        return this.request("POST", "/wx/oauth", body);
+        return this.post("/wx/oauth", options);
+    }
+    translateLink(options) {
+        return this.post("/wx/translatelink", options);
+    }
+    autoAuth(options) {
+        return this.post("/wx/autoauth", options);
+    }
+    appMsgExt(options) {
+        return this.post("/wx/appmsgext", options);
+    }
+    appMsgLike(options) {
+        return this.post("/wx/appmsglike", options);
     }
 }
 exports.SmallCat = SmallCat;

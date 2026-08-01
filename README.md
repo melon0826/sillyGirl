@@ -338,13 +338,22 @@ const sc = new SmallCat({ id: 1 });
 | `createQr(type)` | 创建二维码 |
 | `createQr(options)` | 创建二维码，支持对象参数 |
 | `checkQr(uuid)` | 检查二维码状态 |
-| `addUser(options)` | 添加用户，参数 `{ code, type, displayName? }` |
+| `addUser(options)` / `rescanUser(options)` | 新增 / 重扫更新账号 |
 | `userList()` | 获取用户列表 |
+| `checkUsers(options)` | 检查一个或多个账号状态 |
+| `setUserRemark(options)` / `setUserDisabled(options)` / `deleteUser(options)` | 修改备注 / 启停 / 删除账号 |
+| `proxyList()` / `testProxy(options)` / `addProxy(options)` / `deleteProxy(options)` | 代理节点管理 |
+| `creditBalance()` / `creditLedger(query?)` | 积分余额 / 流水 |
 | `getCode(options)` | 获取小程序 code，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
+| `getSession(options)` / `refreshSession(options)` | 获取 / 刷新小程序运行时 session |
 | `getUserInfo(options)` | 获取小程序用户信息，参数 `{ openid, appid }`，返回 smallcat API 原始 JSON |
+| `getEncryptKey(options)` | 获取用户加密 key |
 | `getPhoneNumber(options)` | 获取手机号 code，调用 `POST /wx/getphonenumber`，返回 smallcat API 原始 JSON |
+| `cloud(options)` / `gateway(options)` | 云函数 / V3 云网关凭证 |
 | `qrCodeAuth(options)` | 二维码 OAuth 授权，调用 `POST /wx/qrcodeauth`，返回 smallcat API 原始 JSON |
 | `oAuth(options)` | OAuth 授权，调用 `POST /wx/oauth`，返回 smallcat API 原始 JSON |
+| `translateLink(options)` / `autoAuth(options)` | 解析小程序口令 / 刷新 APP SESSION |
+| `appMsgExt(options)` / `appMsgLike(options)` | 阅读扩展 / 公众号文章点赞 |
 | `request(method, path, body, query)` | 调用其他 smallcat API |
 
 示例：
@@ -365,6 +374,12 @@ const code = sc.getCode({
   appid: "wx1234567890abcdef",
 });
 s.reply(JSON.stringify(code));
+
+const session = sc.getSession({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+s.reply(JSON.stringify(session));
 
 const userInfo = sc.getUserInfo({
   openid: "用户 openid",

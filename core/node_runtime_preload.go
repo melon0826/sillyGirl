@@ -417,30 +417,39 @@ const nodeRuntimePreloadScript = `
         throw new Error("smallcat 接口返回非 JSON：" + String(text || "").slice(0, 120));
       }
     }
+    post(path, options) { return this.request("POST", path, Object.assign({}, options || {})); }
     createQr(type) { return this.request("POST", "/api/qr/start", type && typeof type === "object" ? type : { type }); }
     checkQr(uuid) { return this.request("GET", "/api/qr/status", undefined, { uuid }); }
-    addUser(options) { return this.request("POST", "/api/accounts/add", options || {}); }
+    addUser(options) { return this.post("/api/accounts/add", options); }
+    rescanUser(options) { return this.post("/api/accounts/rescan", options); }
     userList() { return this.request("GET", "/api/accounts"); }
-    getCode(options) {
-      const body = Object.assign({}, options || {});
-      return this.request("POST", "/wx/code", body);
+    checkUsers(options) { return this.post("/api/accounts/status", options); }
+    setUserRemark(options) { return this.post("/api/accounts/remark", options); }
+    setUserDisabled(options) { return this.post("/api/accounts/disable", options); }
+    deleteUser(options) { return this.post("/api/accounts/delete", options); }
+    proxyList() { return this.request("GET", "/api/proxies"); }
+    testProxy(options) { return this.post("/api/proxies/test", options); }
+    addProxy(options) { return this.post("/api/proxies/add", options); }
+    deleteProxy(options) { return this.post("/api/proxies/delete", options); }
+    creditBalance() { return this.request("GET", "/credits/balance"); }
+    creditLedger(query) {
+      const params = query == null ? { limit: 50 } : (typeof query === "number" ? { limit: query } : query);
+      return this.request("GET", "/credits/ledger", undefined, params);
     }
-    getUserInfo(options) {
-      const body = Object.assign({}, options || {});
-      return this.request("POST", "/wx/getuserinfo", body);
-    }
-    getPhoneNumber(options) {
-      const body = Object.assign({}, options || {});
-      return this.request("POST", "/wx/getphonenumber", body);
-    }
-    qrCodeAuth(options) {
-      const body = Object.assign({}, options || {});
-      return this.request("POST", "/wx/qrcodeauth", body);
-    }
-    oAuth(options) {
-      const body = Object.assign({}, options || {});
-      return this.request("POST", "/wx/oauth", body);
-    }
+    getCode(options) { return this.post("/wx/code", options); }
+    getSession(options) { return this.post("/wx/getsession", options); }
+    refreshSession(options) { return this.post("/wx/refresh", options); }
+    getUserInfo(options) { return this.post("/wx/getuserinfo", options); }
+    getEncryptKey(options) { return this.post("/wx/encryptkey", options); }
+    getPhoneNumber(options) { return this.post("/wx/getphonenumber", options); }
+    cloud(options) { return this.post("/wx/cloud", options); }
+    gateway(options) { return this.post("/wx/gateway", options); }
+    qrCodeAuth(options) { return this.post("/wx/qrcodeauth", options); }
+    oAuth(options) { return this.post("/wx/oauth", options); }
+    translateLink(options) { return this.post("/wx/translatelink", options); }
+    autoAuth(options) { return this.post("/wx/autoauth", options); }
+    appMsgExt(options) { return this.post("/wx/appmsgext", options); }
+    appMsgLike(options) { return this.post("/wx/appmsglike", options); }
   }
 
   class DaiDai {

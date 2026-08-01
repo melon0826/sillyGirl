@@ -157,15 +157,31 @@ declare class SmallCat {
     });
     private init;
     request(method: string, path: string, body?: any, query?: Record<string, any>): Promise<any>;
+    private post;
     createQr(type: any): Promise<any>;
     checkQr(uuid: string): Promise<any>;
-    addUser(options: {
-        code: string;
-        type: number | string;
-        displayName?: string;
-    }): Promise<any>;
+    addUser(options: Record<string, any>): Promise<any>;
+    rescanUser(options: Record<string, any>): Promise<any>;
     userList(): Promise<any>;
+    checkUsers(options: Record<string, any>): Promise<any>;
+    setUserRemark(options: Record<string, any>): Promise<any>;
+    setUserDisabled(options: Record<string, any>): Promise<any>;
+    deleteUser(options: Record<string, any>): Promise<any>;
+    proxyList(): Promise<any>;
+    testProxy(options: Record<string, any>): Promise<any>;
+    addProxy(options: Record<string, any>): Promise<any>;
+    deleteProxy(options: Record<string, any>): Promise<any>;
+    creditBalance(): Promise<any>;
+    creditLedger(query?: Record<string, any> | number): Promise<any>;
     getCode(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    getSession(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
+    refreshSession(options: {
         openid: string;
         appid: string;
     }): Promise<any>;
@@ -173,12 +189,22 @@ declare class SmallCat {
         openid: string;
         appid: string;
     }): Promise<any>;
+    getEncryptKey(options: {
+        openid: string;
+        appid: string;
+    }): Promise<any>;
     getPhoneNumber(options: {
         openid: string;
         appid: string;
     }): Promise<any>;
+    cloud(options: Record<string, any>): Promise<any>;
+    gateway(options: Record<string, any>): Promise<any>;
     qrCodeAuth(options: Record<string, any>): Promise<any>;
     oAuth(options: Record<string, any>): Promise<any>;
+    translateLink(options: Record<string, any>): Promise<any>;
+    autoAuth(options: Record<string, any>): Promise<any>;
+    appMsgExt(options: Record<string, any>): Promise<any>;
+    appMsgLike(options: Record<string, any>): Promise<any>;
 }
 declare class DaiDai {
     id: number;

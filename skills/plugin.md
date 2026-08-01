@@ -292,13 +292,22 @@ Common methods:
 
 - `sc.createQr(type)`
 - `sc.checkQr(uuid)`
-- `sc.addUser({ code, type, displayName })`
+- `sc.addUser(payload)` / `sc.rescanUser(payload)`
 - `sc.userList()`
+- `sc.checkUsers(payload)`
+- `sc.setUserRemark(payload)` / `sc.setUserDisabled(payload)` / `sc.deleteUser(payload)`
+- `sc.proxyList()` / `sc.testProxy(payload)` / `sc.addProxy(payload)` / `sc.deleteProxy(payload)`
+- `sc.creditBalance()` / `sc.creditLedger(query)`
 - `sc.getCode({ openid, appid })`
+- `sc.getSession({ openid, appid })` / `sc.refreshSession({ openid, appid })`
 - `sc.getUserInfo({ openid, appid })`
+- `sc.getEncryptKey({ openid, appid })`
 - `sc.getPhoneNumber({ openid, appid })`
+- `sc.cloud(payload)` / `sc.gateway(payload)`
 - `sc.qrCodeAuth(payload)`
 - `sc.oAuth(payload)`
+- `sc.translateLink(payload)` / `sc.autoAuth(payload)`
+- `sc.appMsgExt(payload)` / `sc.appMsgLike(payload)`
 
 Use camelCase exactly. Do not write `chechQr`.
 

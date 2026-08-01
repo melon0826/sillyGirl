@@ -671,13 +671,33 @@ sc.address  // smallcat 地址
 | `createQr(type)` | `POST /api/qr/start` | 登录来源类型，如 `1` | 原始 API 响应 |
 | `createQr(options)` | `POST /api/qr/start` | `{ type, openid?, proxyNodeId? }` 等对象 | 原始 API 响应 |
 | `checkQr(uuid)` | `GET /api/qr/status?uuid=...` | 二维码 UUID | 原始 API 响应 |
-| `addUser(options)` | `POST /api/accounts/add` | `{ code, type, displayName? }` | 原始 API 响应 |
+| `addUser(options)` | `POST /api/accounts/add` | `{ code, displayName?, oauthState?, ... }` | 原始 API 响应 |
+| `rescanUser(options)` | `POST /api/accounts/rescan` | `{ openid, code, displayName?, oauthState? }` | 原始 API 响应 |
 | `userList()` | `GET /api/accounts` | 无 | 原始 API 响应 |
+| `checkUsers(options)` | `POST /api/accounts/status` | `{ openid }`，`openid` 可为字符串或数组 | 原始 API 响应 |
+| `setUserRemark(options)` | `POST /api/accounts/remark` | `{ openid, displayName }` | 原始 API 响应 |
+| `setUserDisabled(options)` | `POST /api/accounts/disable` | `{ openid, disabled }` | 原始 API 响应 |
+| `deleteUser(options)` | `POST /api/accounts/delete` | `{ openid }` | 原始 API 响应 |
+| `proxyList()` | `GET /api/proxies` | 无 | 原始 API 响应 |
+| `testProxy(options)` | `POST /api/proxies/test` | 代理节点对象 | 原始 API 响应 |
+| `addProxy(options)` | `POST /api/proxies/add` | 代理节点对象 | 原始 API 响应 |
+| `deleteProxy(options)` | `POST /api/proxies/delete` | `{ id }` | 原始 API 响应 |
+| `creditBalance()` | `GET /credits/balance` | 无 | 原始 API 响应 |
+| `creditLedger(query?)` | `GET /credits/ledger` | 查询对象或条数，如 `{ limit: 50 }` / `50` | 原始 API 响应 |
 | `getCode(options)` | `POST /wx/code` | `{ openid, appid }` | 原始 API 响应 |
+| `getSession(options)` | `POST /wx/getsession` | `{ openid, appid }` | 原始 API 响应 |
+| `refreshSession(options)` | `POST /wx/refresh` | `{ openid, appid }` | 原始 API 响应 |
 | `getUserInfo(options)` | `POST /wx/getuserinfo` | `{ openid, appid }` | 原始 API 响应 |
+| `getEncryptKey(options)` | `POST /wx/encryptkey` | `{ openid, appid }` | 原始 API 响应 |
 | `getPhoneNumber(options)` | `POST /wx/getphonenumber` | `{ openid, appid }` | 原始 API 响应 |
+| `cloud(options)` | `POST /wx/cloud` | `{ openid, appid, function_name, data }` | 原始 API 响应 |
+| `gateway(options)` | `POST /wx/gateway` | `{ openid, appid, action, env }` 或完整 `domain` | 原始 API 响应 |
 | `qrCodeAuth(options)` | `POST /wx/qrcodeauth` | `{ openid, uuid }` | 原始 API 响应 |
 | `oAuth(options)` | `POST /wx/oauth` | `{ openid, appid, redirect_uri, scope?, state?, component_appid? }` 等 | 原始 API 响应 |
+| `translateLink(options)` | `POST /wx/translatelink` | `{ openid, link, scene? }` | 原始 API 响应 |
+| `autoAuth(options)` | `POST /wx/autoauth` | `{ openid }` | 原始 API 响应 |
+| `appMsgExt(options)` | `POST /wx/appmsgext` | `{ openid, article_url }` | 原始 API 响应 |
+| `appMsgLike(options)` | `POST /wx/appmsglike` | `{ openid, article_url }` | 原始 API 响应 |
 | `request(method, path, body, query)` | 任意 smallcat API | 自定义方法、路径、请求体、查询参数 | 原始 API 响应 |
 
 smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原始 JSON，一般结构为：
@@ -707,7 +727,6 @@ const checked = sc.checkQr(qr.data.uuid);
 if (checked.data.state === "confirmed" && checked.data.wxCode) {
   const saved = sc.addUser({
     code: checked.data.wxCode,
-    type: checked.data.type || 1,
     displayName: "备注",
   });
   s.reply(saved.message);
@@ -723,6 +742,18 @@ const code = sc.getCode({
   appid: "wx1234567890abcdef",
 });
 console.log(code.status, code.message, code.data);
+
+const session = sc.getSession({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+console.log(session.data && session.data.session);
+
+const refreshed = sc.refreshSession({
+  openid: "用户 openid",
+  appid: "wx1234567890abcdef",
+});
+console.log(refreshed.data && refreshed.data.expireIn);
 
 const userInfo = sc.getUserInfo({
   openid: "用户 openid",
@@ -755,7 +786,7 @@ console.log(qrOAuth.status, qrOAuth.message, qrOAuth.data);
 注意：
 
 - `new SmallCat({ id: 1 })` 只接受对象参数，不支持 `new SmallCat(1)`。
-- `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", type: 1, displayName: "备注" })`。
+- `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", displayName: "备注" })`；重扫已有账号使用 `rescanUser`。
 - 只有网络失败、请求体编码失败、JSON 解析失败这类没有 smallcat 原始响应的情况，运行时才会返回 `{ status: false, message: "..." }`。
 
 ### DaiDai 内联客户端
