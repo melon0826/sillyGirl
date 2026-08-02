@@ -99,16 +99,17 @@ sudo journalctl -u sillygirl -f   # 查看日志
 
 ```bash
 # 拉取镜像
-docker pull smallfawn/sillygirl:latest
+docker pull ghcr.io/melon0826/sillygirl:latest
 
 # 运行
 docker run -d \
   --name sillygirl \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 8687:8687 \
   -e SILLYGIRL_DATA_PATH=/data \
+  -e SILLYGIRL_PORT=8687 \
   -v $(pwd)/data:/data \
-  smallfawn/sillygirl:latest
+  ghcr.io/melon0826/sillygirl:latest
 ```
 
 镜像默认使用 `/data` 作为数据目录，`/app/plugins`、`/app/conf` 会指向 `/data` 下的对应目录，所以只需要映射 `./data:/data` 即可持久化数据库、插件和配置。
@@ -123,16 +124,16 @@ version: "3.8"
 
 services:
   sillygirl:
-    image: smallfawn/sillygirl:latest
+    image: ghcr.io/melon0826/sillygirl:latest
     container_name: sillygirl
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8687:8687"
     volumes:
       - ./data:/data
       - /etc/localtime:/etc/localtime:ro
     environment:
-      - SILLYGIRL_PORT=8080
+      - SILLYGIRL_PORT=8687
       - SILLYGIRL_DATA_PATH=/data
     # 如需使用 Redis，取消下面注释
     # depends_on:
@@ -157,7 +158,8 @@ docker-compose logs -f
 
 | 环境变量 | 说明 | 默认值 |
 |----------|------|--------|
-| `SILLYGIRL_PORT` | HTTP 服务端口 | 8080 |
+| `SILLYGIRL_PORT` | HTTP 服务端口（兼容 `SHANIU_PORT`） | 8080 |
+| `SILLYGIRL_DATA_PATH` | 数据目录（兼容 `SHANIU_DATA_PATH`） | `/etc/sillyGirl/`（Linux） |
 | `SILLYGIRL_REDIS_ADDR` | Redis 地址 | `""` |
 | `SILLYGIRL_REDIS_PASSWORD` | Redis 密码 | `""` |
 

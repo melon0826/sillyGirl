@@ -12,13 +12,14 @@ mkdir -p data
 docker run -d \
   --name sillygirl \
   --restart unless-stopped \
-  -p 8080:8080 \
+  -p 8687:8687 \
   -e SILLYGIRL_DATA_PATH=/data \
+  -e SILLYGIRL_PORT=8687 \
   -v $(pwd)/data:/data \
-  smallfawn/sillygirl:latest
+  ghcr.io/melon0826/sillygirl:latest
 ```
 
-访问 `http://localhost:8080/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和配置。
+访问 `http://localhost:8687/admin` 打开管理面板。`./data` 会映射到容器内 `/data`，用于持久化 BoltDB、插件和配置。
 机器人里发送 `更新` 会通过 GitHub 加速地址下载最新 Release 包并替换程序文件，不需要挂载 Docker socket。
 
 ## Docker Compose
@@ -28,13 +29,14 @@ docker run -d \
 ```yaml
 services:
   sillygirl:
-    image: smallfawn/sillygirl:latest
+    image: ghcr.io/melon0826/sillygirl:latest
     container_name: sillygirl
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8687:8687"
     environment:
       SILLYGIRL_DATA_PATH: /data
+      SILLYGIRL_PORT: 8687
     volumes:
       - ./data:/data
 ```

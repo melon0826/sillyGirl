@@ -94,6 +94,9 @@ var once = new(sync.Once)
 var GetDataHome = func() string {
 	home := os.Getenv("SILLYGIRL_DATA_PATH")
 	if home == "" {
+		home = os.Getenv("SHANIU_DATA_PATH")
+	}
+	if home == "" {
 		if runtime.GOOS == "windows" {
 			home = `C:\ProgramData\sillyGirl\`
 		} else if runtime.GOOS == "darwin" {

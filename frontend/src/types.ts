@@ -177,3 +177,15 @@ export type DaidaiPanel = {
   status?: string;
   message?: string;
 };
+
+export type YybPanel = {
+  id?: string;
+  name?: string;
+  address: string;
+  created_at?: number;
+  updated_at?: number;
+  last_checked_at?: number;
+  status?: string;
+  message?: string;
+  account_count?: number;
+};

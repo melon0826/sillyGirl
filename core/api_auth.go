@@ -314,10 +314,12 @@ func overviewIntegrationStatuses() map[string]interface{} {
 	qinglongPanels := getQinglongPanels()
 	smallcatPanels := getSmallcatPanels()
 	daidaiPanels := getDaidaiPanels()
+	yybPanels := getYybPanels()
 	return map[string]interface{}{
 		"qinglong": overviewPanelStatus("青龙容器", len(qinglongPanels), countOnlineQinglongPanels(qinglongPanels)),
 		"smallcat": overviewPanelStatus("smallcat", len(smallcatPanels), countOnlineSmallcatPanels(smallcatPanels)),
 		"daidai":   overviewPanelStatus("呆呆容器", len(daidaiPanels), countOnlineDaidaiPanels(daidaiPanels)),
+		"yyb":      overviewPanelStatus("yyb-go", len(yybPanels), countOnlineYybPanels(yybPanels)),
 	}
 }
 
@@ -351,6 +353,16 @@ func countOnlineSmallcatPanels(panels []SmallcatPanel) int {
 }
 
 func countOnlineDaidaiPanels(panels []DaidaiPanel) int {
+	count := 0
+	for _, panel := range panels {
+		if panel.Status == "online" {
+			count++
+		}
+	}
+	return count
+}
+
+func countOnlineYybPanels(panels []YybPanel) int {
 	count := 0
 	for _, panel := range panels {
 		if panel.Status == "online" {

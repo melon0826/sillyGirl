@@ -250,6 +250,17 @@ func initWeb() {
 	})
 
 	port, normalizedPort := canonicalHTTPPortValue(sillyGirl.GetString("port"))
+	if envPort := strings.TrimSpace(os.Getenv("SHANIU_PORT")); envPort != "" {
+		envPortValue := normalizeHTTPPort(envPort)
+		if envPortValue >= 1 && envPortValue <= 65535 {
+			port, normalizedPort = envPortValue, fmt.Sprint(envPortValue)
+		}
+	} else if envPort = strings.TrimSpace(os.Getenv("SILLYGIRL_PORT")); envPort != "" {
+		envPortValue := normalizeHTTPPort(envPort)
+		if envPortValue >= 1 && envPortValue <= 65535 {
+			port, normalizedPort = envPortValue, fmt.Sprint(envPortValue)
+		}
+	}
 	if port == 8080 && strings.TrimSpace(sillyGirl.GetString("port")) == "" {
 		sillyGirl.Set("port", 8080)
 	} else if stored := strings.TrimSpace(sillyGirl.GetString("port")); stored != normalizedPort && stored != fmt.Sprintf("d:%d", port) {

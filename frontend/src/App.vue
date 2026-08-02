@@ -68,7 +68,7 @@ import {
   Wand2,
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
-import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
+import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task, YybPanel } from './types';
 import { timestamp } from './utils';
 
 type ApiEnvelope<T> = {
@@ -99,7 +99,7 @@ type PageKey =
   | 'plugin-configs'
   | 'settings';
 
-type ContainerKind = 'qinglong' | 'daidai' | 'smallcat';
+type ContainerKind = 'qinglong' | 'daidai' | 'smallcat' | 'yyb';
 type MessageToolKind = 'carry' | 'reply' | 'messages';
 
 const validPages: PageKey[] = [
@@ -117,7 +117,7 @@ const validPages: PageKey[] = [
   'plugin-configs',
   'settings',
 ];
-const legacyContainerPages: ContainerKind[] = ['qinglong', 'daidai', 'smallcat'];
+const legacyContainerPages: ContainerKind[] = ['qinglong', 'daidai', 'smallcat', 'yyb'];
 const legacyMessageToolPages: MessageToolKind[] = ['carry', 'reply', 'messages'];
 
 const starter = `/**
@@ -177,6 +177,7 @@ const overviewIntegrations = computed(() => {
     { key: 'qinglong', label: '青龙容器' },
     { key: 'smallcat', label: 'smallcat' },
     { key: 'daidai', label: '呆呆容器' },
+    { key: 'yyb', label: 'yyb-go' },
   ];
   const rows = user.value?.integrations || {};
   return defaults.map((item) => {
@@ -1244,25 +1245,84 @@ async function removeDaidaiPanel(row: DaidaiPanel) {
   loadDaidaiPanels();
 }
 
+const yyb = reactive({
+  rows: [] as YybPanel[],
+  total: 0,
+  loading: false,
+  editing: null as YybPanel | null,
+  form: {} as YybPanel,
+  testing: false,
+  saving: false,
+});
+async function loadYybPanels() {
+  yyb.loading = true;
+  try {
+    const res = await get<ApiEnvelope<{ list: YybPanel[]; total: number }>>('/api/admin/yyb/panels');
+    const data = apiData(res);
+    yyb.rows = data?.list || [];
+    yyb.total = data?.total || 0;
+  } finally {
+    yyb.loading = false;
+  }
+}
+function openYybPanel(row?: YybPanel) {
+  const data = row || { name: '', address: '' };
+  yyb.editing = data;
+  yyb.form = { ...data };
+}
+async function testYybPanel(panel = yyb.form) {
+  yyb.testing = true;
+  try {
+    await post('/api/admin/yyb/panel/test', panel);
+    message.success('yyb-go 连接正常');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'yyb-go 连接失败');
+  } finally {
+    yyb.testing = false;
+  }
+}
+async function saveYybPanel() {
+  yyb.saving = true;
+  try {
+    await post('/api/admin/yyb/panel', yyb.form);
+    yyb.editing = null;
+    message.success('yyb-go 已添加');
+    await loadYybPanels();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'yyb-go 添加失败');
+  } finally {
+    yyb.saving = false;
+  }
+}
+async function removeYybPanel(row: YybPanel) {
+  await del('/api/admin/yyb/panel', row);
+  message.success('已删除');
+  loadYybPanels();
+}
+
 const containerOptions = [
   { label: '青龙', value: 'qinglong' },
   { label: '呆呆', value: 'daidai' },
   { label: 'smallcat', value: 'smallcat' },
+  { label: 'yyb-go', value: 'yyb' },
 ] as { label: string; value: ContainerKind }[];
 const containerHelpText = computed(() => {
   if (containerKind.value === 'qinglong') return '保存前会检测 /open/auth/token 是否可用。';
   if (containerKind.value === 'daidai') return '保存前会调用 /api/open-api/token，使用 app_key/app_secret 验证 Open API。';
+  if (containerKind.value === 'yyb') return '保存前会检测 /health 是否可用，无需认证。';
   return '保存前会调用 /api/auth/validate，使用页面 API AUTH 一致的 auth 请求头验证。';
 });
 const containerAddLabel = computed(() => {
   if (containerKind.value === 'qinglong') return '添加青龙面板';
   if (containerKind.value === 'daidai') return '添加呆呆面板';
+  if (containerKind.value === 'yyb') return '添加 yyb-go';
   return '添加 smallcat';
 });
 
 function loadActiveContainerPanels() {
   if (containerKind.value === 'qinglong') return loadQinglongPanels();
   if (containerKind.value === 'daidai') return loadDaidaiPanels();
+  if (containerKind.value === 'yyb') return loadYybPanels();
   return loadSmallcatPanels();
 }
 
@@ -1273,6 +1333,10 @@ function openActiveContainerPanel() {
   }
   if (containerKind.value === 'daidai') {
     openDaidaiPanel();
+    return;
+  }
+  if (containerKind.value === 'yyb') {
+    openYybPanel();
     return;
   }
   openSmallcatPanel();
@@ -2235,7 +2299,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Typography.Link :href="overviewVersion.repository" target="_blank">GitHub</Typography.Link>
                 <Button type="primary" size="small" :loading="systemUpdate.running" @click="startOnlineUpdate">
                   <template #icon><CloudDownload :size="15" /></template>
-                  在线更新
+                  更新到最新版本
                 </Button>
               </Space>
               <Row :gutter="[12, 12]">
@@ -2245,6 +2309,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="青龙容器" :value="overviewIntegrations.find((item) => item.key === 'qinglong')?.count || 0" /></Card></Col>
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="smallcat" :value="overviewIntegrations.find((item) => item.key === 'smallcat')?.count || 0" /></Card></Col>
                 <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="呆呆容器" :value="overviewIntegrations.find((item) => item.key === 'daidai')?.count || 0" /></Card></Col>
+                <Col :xs="24" :sm="12" :md="8"><Card><Statistic title="yyb-go" :value="overviewIntegrations.find((item) => item.key === 'yyb')?.count || 0" /></Card></Col>
               </Row>
             </section>
 
@@ -2838,6 +2903,40 @@ function smallcatOpenids(record?: AdminUserRow) {
                 </Table.Column>
               </Table>
 
+              <Table v-else-if="containerKind === 'yyb'" row-key="id" :loading="yyb.loading" :data-source="yyb.rows" :pagination="{ total: yyb.total, pageSize: 20 }">
+                <Table.Column title="#" :width="72">
+                  <template #default="{ index }">{{ index + 1 }}</template>
+                </Table.Column>
+                <Table.Column title="名称" data-index="name" :width="180">
+                  <template #default="{ record }">
+                    <Typography.Text strong>{{ record.name || record.address }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="地址" data-index="address" ellipsis />
+                <Table.Column title="状态" data-index="status" :width="120">
+                  <template #default="{ record }">
+                    <Tag :color="record.status === 'online' ? 'green' : 'default'">{{ record.status === 'online' ? '连接正常' : '未检测' }}</Tag>
+                  </template>
+                </Table.Column>
+                <Table.Column title="账号数" :width="110">
+                  <template #default="{ record }">
+                    <Typography.Text>{{ record.account_count != null ? record.account_count : '-' }}</Typography.Text>
+                  </template>
+                </Table.Column>
+                <Table.Column title="最后检测" data-index="last_checked_at" :width="180">
+                  <template #default="{ text }">{{ timestamp(text) }}</template>
+                </Table.Column>
+                <Table.Column title="操作" :width="210">
+                  <template #default="{ record }">
+                    <Button type="text" @click="testYybPanel(record)">检测</Button>
+                    <Button type="text" @click="openYybPanel(record)">编辑</Button>
+                    <Popconfirm title="确认删除这个 yyb-go？" @confirm="removeYybPanel(record)">
+                      <Button type="text" danger><Trash2 :size="16" /></Button>
+                    </Popconfirm>
+                  </template>
+                </Table.Column>
+              </Table>
+
               <Table v-else row-key="id" :loading="smallcat.loading" :data-source="smallcat.rows" :pagination="{ total: smallcat.total, pageSize: 20 }">
                 <Table.Column title="#" :width="72">
                   <template #default="{ index }">{{ index + 1 }}</template>
@@ -3260,6 +3359,20 @@ function smallcatOpenids(record?: AdminUserRow) {
             <Input.Password v-model:value="daidai.form.app_secret" />
           </Form.Item>
           <Button @click="testDaidaiPanel()" :loading="daidai.testing">
+            <template #icon><RefreshCw :size="16" /></template>检测连接
+          </Button>
+        </Form>
+      </Modal>
+
+      <Modal :open="!!yyb.editing" title="yyb-go" width="720px" :confirm-loading="yyb.saving" @cancel="yyb.editing = null" @ok="saveYybPanel">
+        <Form layout="vertical">
+          <Form.Item label="名称">
+            <Input v-model:value="yyb.form.name" placeholder="例如：主 yyb-go" />
+          </Form.Item>
+          <Form.Item label="yyb-go 地址" required extra="无需认证，保存前会检测 /health 是否可用。">
+            <Input v-model:value="yyb.form.address" placeholder="http://127.0.0.1:8181" />
+          </Form.Item>
+          <Button @click="testYybPanel()" :loading="yyb.testing">
             <template #icon><RefreshCw :size="16" /></template>检测连接
           </Button>
         </Form>
