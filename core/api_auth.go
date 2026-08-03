@@ -289,9 +289,11 @@ func overviewAdapterStatuses() []map[string]interface{} {
 		Label    string
 	}{
 		{Platform: "clawbot", Label: "微信 ClawBot"},
+		{Platform: "dingtalk", Label: "钉钉机器人"},
 		{Platform: "pagermaid", Label: "Pagermaid"},
 		{Platform: "qq", Label: "QQ"},
-		{Platform: "web", Label: "Web"},
+		{Platform: "qqguild", Label: "QQ 官方频道机器人"},
+		{Platform: "web", Label: "Web Bot"},
 		{Platform: "telegram", Label: "Telegram Bot"},
 	}
 	rows := []map[string]interface{}{}

@@ -229,15 +229,35 @@ func testYybPanel(panel YybPanel) (*YybPanel, error) {
 }
 
 func countYybAccounts(ctx context.Context, address string) int {
-	envelope, err := requestYybJSON(ctx, address, "/accounts", nil)
+	address = normalizeYybAddress(address)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address+"/accounts", nil)
 	if err != nil {
 		return 0
 	}
-	var accounts []json.RawMessage
-	if err := json.Unmarshal(envelope.Data, &accounts); err != nil {
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
 		return 0
 	}
-	return len(accounts)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024))
+	if err != nil {
+		return 0
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0
+	}
+	body := strings.TrimSpace(string(raw))
+	var accounts []json.RawMessage
+	if json.Unmarshal([]byte(body), &accounts) == nil {
+		return len(accounts)
+	}
+	envelope := &yybEnvelope{}
+	if json.Unmarshal([]byte(body), envelope) == nil && len(envelope.Data) > 0 && string(envelope.Data) != "null" {
+		if json.Unmarshal(envelope.Data, &accounts) == nil {
+			return len(accounts)
+		}
+	}
+	return 0
 }
 
 func requestYybJSON(ctx context.Context, address string, path string, query map[string]string) (*yybEnvelope, error) {

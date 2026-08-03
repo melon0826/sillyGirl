@@ -38,8 +38,10 @@ import Typography from 'ant-design-vue/es/typography';
 import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import QRCode from 'qrcode';
 import {
+  Antenna,
   Bot,
-  Boxes,
+  CircleCheck,
+  CircleX,
   ClipboardList,
   CloudDownload,
   Database,
@@ -51,30 +53,43 @@ import {
   LogOut,
   MessageSquare,
   Package,
+  Pause,
   Play,
   Plug,
   Plus,
   QrCode,
-  Radio,
   RefreshCw,
   Save,
   Search,
+  Send,
   Server,
   Settings,
   ShieldCheck,
   Trash2,
   User,
+  X,
   Menu as MenuIcon,
   Wand2,
 } from 'lucide-vue-next';
 import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
-import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task, YybPanel } from './types';
+import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { timestamp } from './utils';
 
 type ApiEnvelope<T> = {
   status?: boolean;
   message?: string;
   data: T;
+};
+
+type WebChatMessage = {
+  t?: string;
+  c?: string;
+  m?: string[];
+};
+
+type WebChatEntry = WebChatMessage & {
+  id: number;
+  own?: boolean;
 };
 
 function apiData<T>(res: ApiEnvelope<T> | T): T {
@@ -96,7 +111,6 @@ type PageKey =
   | 'message-tools'
   | 'containers'
   | 'masters'
-  | 'plugin-configs'
   | 'settings';
 
 type ContainerKind = 'qinglong' | 'daidai' | 'smallcat' | 'yyb';
@@ -114,7 +128,6 @@ const validPages: PageKey[] = [
   'message-tools',
   'containers',
   'masters',
-  'plugin-configs',
   'settings',
 ];
 const legacyContainerPages: ContainerKind[] = ['qinglong', 'daidai', 'smallcat', 'yyb'];
@@ -137,9 +150,127 @@ const containerKind = ref<ContainerKind>(containerKindFromPath());
 const messageToolKind = ref<MessageToolKind>(messageToolKindFromPath());
 const selectedScriptId = ref(scriptIdFromPath());
 const mobileMenuOpen = ref(false);
-const loginModel = reactive({ username: 'admin', password: '' });
+const loginModel = reactive({ username: '', password: '' });
 const setupRequired = ref(false);
-const setupModel = reactive({ username: 'admin', password: '', confirm: '' });
+const setupModel = reactive({ username: '', password: '', confirm: '' });
+
+const webChatMessagesEl = ref<HTMLElement | null>(null);
+const webChat = reactive({
+  open: false,
+  input: '',
+  sending: false,
+  polling: false,
+  error: '',
+  unread: 0,
+  messages: [] as WebChatEntry[],
+});
+const webChatRid = loadWebChatRid();
+let webChatMessageID = 0;
+let webChatPollGeneration = 0;
+
+function loadWebChatRid() {
+  const key = 'sillygirl_web_chat_rid';
+  const current = localStorage.getItem(key)?.trim();
+  if (current) return current;
+  const suffix = typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const rid = `admin-${suffix}`;
+  localStorage.setItem(key, rid);
+  return rid;
+}
+
+function webChatRows(res: ApiEnvelope<WebChatMessage[]> | WebChatMessage[]) {
+  const rows = apiData(res);
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function scrollWebChatToBottom() {
+  await nextTick();
+  const el = webChatMessagesEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+function appendWebChatMessages(rows: WebChatMessage[], own = false) {
+  for (const row of rows) {
+    const content = `${row?.c || ''}`;
+    const images = Array.isArray(row?.m) ? row.m.filter(Boolean) : [];
+    if (!content && images.length === 0) continue;
+    webChat.messages.push({
+      id: ++webChatMessageID,
+      t: row?.t || 'chat',
+      c: content,
+      m: images,
+      own,
+    });
+  }
+  if (!webChat.open) webChat.unread += rows.length;
+  if (webChat.messages.length > 200) {
+    webChat.messages.splice(0, webChat.messages.length - 200);
+  }
+  void scrollWebChatToBottom();
+}
+
+async function pollWebChat(generation: number) {
+  if (!webChat.open || !user.value || generation !== webChatPollGeneration) return;
+  webChat.polling = true;
+  try {
+    const res = await get<ApiEnvelope<WebChatMessage[]>>(
+      `/api/web_chat?rid=${encodeURIComponent(webChatRid)}`,
+    );
+    if (generation !== webChatPollGeneration) return;
+    webChat.error = '';
+    appendWebChatMessages(webChatRows(res));
+  } catch (error) {
+    if (generation !== webChatPollGeneration) return;
+    webChat.error = error instanceof Error ? error.message : 'Web Bot 连接失败';
+    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+  } finally {
+    if (generation === webChatPollGeneration) webChat.polling = false;
+  }
+  if (webChat.open && user.value && generation === webChatPollGeneration) {
+    void pollWebChat(generation);
+  }
+}
+
+function toggleWebChat() {
+  webChat.open = !webChat.open;
+  webChat.unread = 0;
+  webChat.error = '';
+  webChatPollGeneration += 1;
+  if (webChat.open) {
+    if (webChat.messages.length === 0) {
+      appendWebChatMessages([{ t: 'notice', c: 'Web Bot 已连接，可以直接发送命令。' }]);
+    }
+    void pollWebChat(webChatPollGeneration);
+  }
+}
+
+async function sendWebChat() {
+  const content = webChat.input.trim();
+  if (!content || webChat.sending) return;
+  webChat.input = '';
+  webChat.sending = true;
+  webChat.error = '';
+  appendWebChatMessages([{ t: 'chat', c: content }], true);
+  try {
+    const res = await get<ApiEnvelope<WebChatMessage[]>>(
+      `/api/web_chat?rid=${encodeURIComponent(webChatRid)}&ctt=${encodeURIComponent(content)}`,
+    );
+    appendWebChatMessages(webChatRows(res));
+  } catch (error) {
+    webChat.error = error instanceof Error ? error.message : '消息发送失败';
+  } finally {
+    webChat.sending = false;
+    void scrollWebChatToBottom();
+  }
+}
+
+function stopWebChat() {
+  webChat.open = false;
+  webChat.polling = false;
+  webChatPollGeneration += 1;
+}
 
 type AuthResponse = {
   status: string;
@@ -153,9 +284,11 @@ const scriptKeyword = ref('');
 const overviewAdapters = computed(() => {
   const defaults = [
     { platform: 'clawbot', label: '微信 ClawBot' },
+    { platform: 'dingtalk', label: '钉钉机器人' },
     { platform: 'pagermaid', label: 'Pagermaid' },
     { platform: 'qq', label: 'QQ' },
-    { platform: 'web', label: 'Web' },
+    { platform: 'qqguild', label: 'QQ 官方频道机器人' },
+    { platform: 'web', label: 'Web Bot' },
     { platform: 'telegram', label: 'Telegram Bot' },
   ];
   const rows = new Map((user.value?.adapters || []).map((item) => [item.platform, item]));
@@ -166,7 +299,7 @@ const overviewAdapters = computed(() => {
       label: row?.label || item.label,
       online: !!row?.online,
       enabled: row?.enabled !== false,
-      manageable: row?.manageable !== false,
+      manageable: row ? row.manageable !== false : item.platform !== 'web',
       bots_id: row?.bots_id || [],
       count: row?.count || 0,
     };
@@ -194,8 +327,8 @@ const overviewIntegrations = computed(() => {
 const overviewVersion = computed(() => {
   const info = user.value?.version || {};
   return {
-    local: info.local || '1.0.0',
-    remote: info.remote || info.local || '1.0.0',
+      local: info.local || '1.0.2',
+      remote: info.remote || info.local || '1.0.2',
     source: info.source || 'reserved',
     repository: info.repository || 'https://github.com/smallfawn/sillyGirl',
   };
@@ -351,7 +484,6 @@ const menuItems = [
   { key: 'scripts', label: '脚本插件', icon: () => h(FileCode2, { size: 16 }) },
   { key: 'dependencies', label: '依赖管理', icon: () => h(Package, { size: 16 }) },
   { key: 'plugins', label: '插件市场', icon: () => h(Plug, { size: 16 }) },
-  { key: 'plugin-configs', label: '插件配置', icon: () => h(Boxes, { size: 16 }) },
   { key: 'storage', label: '存储', icon: () => h(Database, { size: 16 }) },
   { key: 'users', label: '用户管理', icon: () => h(User, { size: 16 }) },
   { key: 'message-tools', label: '转发/回复/监听', icon: () => h(MessageSquare, { size: 16 }) },
@@ -367,6 +499,10 @@ function pageFromPath(): PageKey {
   const key = path.split('/').filter(Boolean)[0] || 'welcome';
   if (legacyContainerPages.includes(key as ContainerKind)) return 'containers';
   if (legacyMessageToolPages.includes(key as MessageToolKind)) return 'message-tools';
+  if (key === 'plugin-configs') {
+    window.history.replaceState({}, '', '/admin/plugins');
+    return 'plugins';
+  }
   return validPages.includes(key as PageKey) ? (key as PageKey) : 'welcome';
 }
 
@@ -410,7 +546,7 @@ async function loadSetupStatus() {
   return !!data?.initialized;
 }
 
-async function loadUser(setBooting = true) {
+async function loadUser(setBooting = true, reloadSetupOnUnauthorized = true) {
   if (setBooting) booting.value = true;
   try {
     const res = await get<ApiEnvelope<CurrentUser>>('/api/admin/currentUser');
@@ -421,7 +557,9 @@ async function loadUser(setBooting = true) {
     user.value = null;
     if (error instanceof ApiError && error.status === 401) {
       clearAuthToken();
-      await loadSetupStatus().catch(() => undefined);
+      if (reloadSetupOnUnauthorized) {
+        await loadSetupStatus().catch(() => undefined);
+      }
     }
   } finally {
     if (setBooting) booting.value = false;
@@ -483,6 +621,7 @@ async function setupAdmin() {
 }
 
 async function logout() {
+  stopWebChat();
   await post('/api/admin/outlogin').catch(() => undefined);
   clearAuthToken();
   user.value = null;
@@ -493,7 +632,7 @@ async function bootApp() {
   try {
     const initialized = await loadSetupStatus();
     if (initialized) {
-      await loadUser(false);
+      await loadUser(false, false);
     } else {
       user.value = null;
     }
@@ -503,6 +642,7 @@ async function bootApp() {
 }
 
 function handleAdminAuthExpired() {
+  stopWebChat();
   user.value = null;
   booting.value = false;
   window.clearInterval(systemUpdate.timer);
@@ -524,11 +664,12 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopWebChat();
   window.removeEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
 });
 
 const scriptState = reactive({ content: '', loading: false });
-const scriptCreateState = reactive({ open: false, fileName: '新脚本.js', saving: false });
+const scriptCreateState = reactive({ open: false, fileName: '新脚本', suffix: '.js', saving: false });
 const scriptEditorHost = ref<HTMLElement | null>(null);
 const scriptEditorEditable = new Compartment();
 const scriptEditorLanguage = new Compartment();
@@ -713,15 +854,16 @@ async function removeScript() {
 }
 
 function openCreateScriptModal() {
-  scriptCreateState.fileName = '新脚本.js';
+  scriptCreateState.fileName = '新脚本';
+  scriptCreateState.suffix = '.js';
   scriptCreateState.open = true;
 }
 
 function normalizeCreateScriptFileName() {
-  const fileName = scriptCreateState.fileName.trim();
+  const fileName = scriptCreateState.fileName.trim().replace(/\.(js|py)$/i, '');
   if (!fileName) return '';
   if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) return fileName;
-  return /\.(js|py)$/i.test(fileName) ? fileName : `${fileName}.js`;
+  return `${fileName}${scriptCreateState.suffix}`;
 }
 
 async function createScript() {
@@ -732,10 +874,6 @@ async function createScript() {
   }
   if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) {
     message.error('脚本文件名不合法');
-    return;
-  }
-  if (!/\.(js|py)$/i.test(fileName)) {
-    message.error('脚本文件名必须是 .js 或 .py 文件');
     return;
   }
   scriptCreateState.saving = true;
@@ -781,13 +919,17 @@ onBeforeUnmount(() => {
 });
 
 const storageState = reactive({
-  keys: 'sillyGirl',
+  bucket: 'sillyGirl',
+  search: '',
   newBucketName: '',
   createBucketOpen: false,
   entryBucket: 'sillyGirl',
   entryKey: '',
   entryValue: '',
   rows: [] as any[],
+  current: 1,
+  pageSize: 20,
+  total: 0,
   buckets: [] as Array<{ value: string; label: string }>,
   loading: false,
   loadingBuckets: false,
@@ -797,9 +939,7 @@ const storageState = reactive({
 });
 const protectedStorageBuckets = new Set(['plugins', 'sillyGirl', 'auths']);
 const selectedStorageBucket = computed(() => {
-  const value = storageState.keys.trim();
-  if (!value || value.includes('.') || value.includes(',')) return '';
-  return value;
+  return storageState.bucket.trim();
 });
 const canRemoveStorageBucket = computed(() => !!selectedStorageBucket.value && !protectedStorageBuckets.has(selectedStorageBucket.value));
 async function loadStorageBuckets() {
@@ -814,23 +954,41 @@ async function loadStorageBuckets() {
     storageState.loadingBuckets = false;
   }
 }
-async function loadStorage() {
+async function loadStorage(current = 1, pageSize = storageState.pageSize) {
   storageState.loading = true;
   try {
-    const res = await get<ApiEnvelope<{ list: any[]; total: number }>>(`/api/admin/storage/list?keys=${encodeURIComponent(storageState.keys)}`);
-    storageState.rows = apiData(res)?.list || [];
+    const params = new URLSearchParams({
+      keys: selectedStorageBucket.value,
+      current: String(current),
+      pageSize: String(pageSize),
+    });
+    const search = storageState.search.trim();
+    if (search) params.set('search', search);
+    const res = await get<ApiEnvelope<{ list: any[]; total: number; page?: number; pageSize?: number }>>(`/api/admin/storage/list?${params.toString()}`);
+    const data = apiData(res);
+    storageState.rows = data?.list || [];
+    storageState.current = data?.page || current;
+    storageState.pageSize = data?.pageSize || pageSize;
+    storageState.total = data?.total || 0;
   } finally {
     storageState.loading = false;
   }
+}
+function changeStoragePage(pagination: { current?: number; pageSize?: number }) {
+  return loadStorage(pagination.current || 1, pagination.pageSize || storageState.pageSize);
 }
 async function saveStorageRow(row: any) {
   await saveStorage({ [`${row.bucket}.${row.key}`]: row.value });
   message.success('已保存');
 }
 async function selectStorageBucket(bucket?: string) {
-  if (!bucket) return;
-  storageState.keys = bucket;
-  await loadStorage();
+  storageState.bucket = bucket || '';
+  storageState.search = '';
+  if (!bucket) {
+    storageState.rows = [];
+    return;
+  }
+  await loadStorage(1);
 }
 async function openCreateStorageBucket() {
   storageState.newBucketName = '';
@@ -849,9 +1007,10 @@ async function createStorageBucket() {
     message.success('存储桶已创建');
     storageState.newBucketName = '';
     storageState.createBucketOpen = false;
-    storageState.keys = bucket;
+    storageState.bucket = bucket;
+    storageState.search = '';
     await loadStorageBuckets();
-    await loadStorage();
+    await loadStorage(1);
   } finally {
     storageState.creatingBucket = false;
   }
@@ -878,9 +1037,10 @@ async function createStorageEntry() {
     storageState.entryBucket = bucket;
     storageState.entryKey = '';
     storageState.entryValue = '';
-    storageState.keys = bucket;
+    storageState.bucket = bucket;
+    storageState.search = '';
     await loadStorageBuckets();
-    await loadStorage();
+    await loadStorage(1);
   } finally {
     storageState.savingEntry = false;
   }
@@ -895,9 +1055,10 @@ async function removeStorageBucket() {
   try {
     await del('/api/admin/storage/bucket', { bucket });
     message.success('存储桶已删除');
-    storageState.keys = 'sillyGirl';
+    storageState.bucket = 'sillyGirl';
+    storageState.search = '';
     await loadStorageBuckets();
-    await loadStorage();
+    await loadStorage(1);
   } finally {
     storageState.deletingBucket = false;
   }
@@ -958,7 +1119,24 @@ async function loadNormalUsers() {
   }
 }
 
-const tasks = reactive({ rows: [] as Task[], total: 0, editing: null as Task | null, form: {} as any, scripts: [] as any[] });
+const taskPlatformLabels: Record<string, string> = {
+  clawbot: '微信 ClawBot',
+  qq: 'QQ',
+  telegram: 'Telegram Bot',
+  dingtalk: '钉钉机器人',
+  qqguild: 'QQ 官方频道机器人',
+  web: 'Web Bot',
+  pagermaid: 'Pagermaid',
+};
+const tasks = reactive({
+  rows: [] as Task[],
+  total: 0,
+  editing: null as Task | null,
+  form: {} as any,
+  scripts: [] as any[],
+  platforms: [] as Array<{ value: string; label: string }>,
+  platformBots: {} as Record<string, string[]>,
+});
 async function loadTasks(current = 1, pageSize = 20) {
   const res = await get<ApiEnvelope<{ list: Task[]; total: number }>>(`/api/admin/tasks?current=${current}&pageSize=${pageSize}`);
   const data = apiData(res);
@@ -966,20 +1144,35 @@ async function loadTasks(current = 1, pageSize = 20) {
   tasks.total = data?.total || 0;
 }
 async function loadTaskSelects(taskId = '') {
-  const res = await get<ApiEnvelope<{ scripts?: Record<string, string> }>>(`/api/admin/task/selects?task_id=${encodeURIComponent(taskId)}`);
-  tasks.scripts = Object.entries(apiData(res)?.scripts || {})
+  const res = await get<ApiEnvelope<{ scripts?: Record<string, string>; platforms?: Record<string, string[]> }>>(`/api/admin/task/selects?task_id=${encodeURIComponent(taskId)}`);
+  const data = apiData(res);
+  tasks.scripts = Object.entries(data?.scripts || {})
     .filter(([, label]) => /\.(js|py)$/i.test(String(label)))
     .map(([, label]) => {
       const text = String(label);
       const runtime = /\.py$/i.test(text) ? 'python' : 'node';
       return { value: `${runtime} ${text}`, label: `${runtime} ${text}` };
     });
+  tasks.platformBots = data?.platforms || {};
+  const platformNames = new Set([...Object.keys(taskPlatformLabels), ...Object.keys(tasks.platformBots)]);
+  tasks.platforms = [...platformNames].map((platform) => ({
+    value: platform,
+    label: taskPlatformLabels[platform] || platform,
+  }));
 }
 async function openTask(row?: Task) {
   const data = row || { enable: true, command: '' };
   tasks.editing = data;
   await loadTaskSelects(data.task_id || '');
-  tasks.form = { ...data };
+  const target = data.senders?.[0];
+  tasks.form = {
+    ...data,
+    platform: target?.platform || '',
+    recipient: target?.user_id || target?.chat_id || '',
+  };
+  if (tasks.form.platform && !tasks.platforms.some((item) => item.value === tasks.form.platform)) {
+    tasks.platforms.push({ value: tasks.form.platform, label: taskPlatformLabels[tasks.form.platform] || tasks.form.platform });
+  }
 }
 function validateTaskCron(schedule?: string) {
   const value = `${schedule || ''}`.trim();
@@ -997,12 +1190,19 @@ async function saveTask() {
     message.error('Cron表达式格式错误，例如：0 * * * *');
     return;
   }
+  const platform = `${tasks.form.platform || ''}`.trim();
+  const recipient = `${tasks.form.recipient || ''}`.trim();
+  if ((platform && !recipient) || (!platform && recipient)) {
+    message.error('平台和接收人必须同时填写');
+    return;
+  }
   const payload = {
     task_id: tasks.form.task_id,
     title: `${tasks.form.title || ''}`.trim(),
     schedule: `${tasks.form.schedule || ''}`.trim(),
     command: tasks.form.command,
     enable: tasks.form.enable,
+    senders: platform && recipient ? [{ platform, user_id: recipient }] : [],
   };
   await post('/api/admin/tasks', payload);
   tasks.editing = null;
@@ -1358,6 +1558,9 @@ const plugins = reactive({
   sourceModal: false,
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
+  uninstalling: {} as Record<string, boolean>,
+  detailOpen: false,
+  detail: null as PluginInfo | null,
 });
 const pluginClassOptions = computed(() => {
   const classes = (plugins.meta.class || {}) as Record<string, number>;
@@ -1411,6 +1614,10 @@ function pluginIconIsImage(row: PluginInfo) {
 function pluginInitial(row: PluginInfo) {
   const text = String(row.title || row.id || 'P').trim();
   return (text ? text.slice(0, 1) : 'P').toUpperCase();
+}
+function openPluginDetail(row: PluginInfo) {
+  plugins.detail = row;
+  plugins.detailOpen = true;
 }
 async function openPluginSourceManager() {
   plugins.sourceModal = true;
@@ -1491,10 +1698,39 @@ async function installPlugin(row: PluginInfo) {
     const firstMessage = Object.values(data.messages || {}).find(Boolean);
     message.success(firstMessage || (row.status === 1 ? '已更新' : '已安装'));
     await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
+    try {
+      await offerPluginDependencyInstall(row);
+    } catch (error) {
+      message.warning(`插件已安装，但依赖检测失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件安装失败');
   } finally {
     plugins.installing[row.id] = false;
+  }
+}
+async function uninstallPlugin(row: PluginInfo) {
+  plugins.uninstalling[row.id] = true;
+  try {
+    const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/admin/storage', {
+      [`plugins.${row.id}`]: 'uninstall',
+    });
+    const data = apiData(res) || {};
+    const firstError = Object.values(data.errors || {}).find(Boolean);
+    if (firstError) {
+      throw new ApiError(200, firstError);
+    }
+    const firstMessage = Object.values(data.messages || {}).find(Boolean);
+    if (pluginConfigs.selected?.uuid === row.id) {
+      pluginConfigs.modalOpen = false;
+      pluginConfigs.selected = null;
+    }
+    message.success(firstMessage || '插件已卸载');
+    await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '插件卸载失败');
+  } finally {
+    plugins.uninstalling[row.id] = false;
   }
 }
 function pluginStatusLabel(row: PluginInfo) {
@@ -1507,13 +1743,8 @@ function pluginStatusColor(row: PluginInfo) {
   if (row.status === 2 || row.status === 6) return 'green';
   return 'default';
 }
-function pluginActionLabel(row: PluginInfo) {
-  if (row.status === 1) return '更新';
-  if (row.status === 2 || row.status === 6) return '已安装';
-  return '安装';
-}
-function pluginActionDisabled(row: PluginInfo) {
-  return row.status === 2 || row.status === 6;
+function pluginInstalled(row: PluginInfo) {
+  return row.status === 1 || row.status === 2 || row.status === 6;
 }
 
 type NodeDependencyPlugin = {
@@ -1538,6 +1769,112 @@ type NodeDependencyRow = {
 
 type DependencyRuntime = 'node' | 'python';
 type DependencyToolStatus = { available: boolean; path?: string; message?: string; registry?: string; target?: string };
+type PluginDependencyPlan = {
+  runtime: DependencyRuntime;
+  plugin: string;
+  pluginTitle: string;
+  dependencies: NodeDependencyRow[];
+  tool: DependencyToolStatus;
+};
+
+function marketPluginFileName(row: PluginInfo) {
+  const address = `${row.address || ''}`.trim();
+  if (!address) return '';
+  const query = address.includes('?') ? address.slice(address.indexOf('?') + 1) : '';
+  const params = new URLSearchParams(query);
+  const candidate = params.get('path') || params.get('raw') || address;
+  try {
+    const pathname = candidate.startsWith('http://') || candidate.startsWith('https://')
+      ? new URL(candidate).pathname
+      : decodeURIComponent(candidate).split('?')[0];
+    return pathname.split(/[\\/]/).filter(Boolean).pop() || '';
+  } catch {
+    return candidate.split(/[\\/]/).filter(Boolean).pop()?.split('?')[0] || '';
+  }
+}
+
+function marketPluginDependencyRuntime(row: PluginInfo): DependencyRuntime {
+  return row.type === 'python' || row.suffix?.toLowerCase() === '.py' ? 'python' : 'node';
+}
+
+async function resolvePluginDependencyPlan(row: PluginInfo): Promise<PluginDependencyPlan | null> {
+  if (!Array.isArray(row.dependencies) || row.dependencies.length === 0) return null;
+  const runtime = marketPluginDependencyRuntime(row);
+  const listRes = await get<ApiEnvelope<{
+    plugins: NodeDependencyPlugin[];
+    dependencies: NodeDependencyRow[];
+    tool: DependencyToolStatus;
+  }>>(`/api/admin/plugin/dependencies?runtime=${encodeURIComponent(runtime)}`);
+  const listData = apiData(listRes);
+  const fileName = marketPluginFileName(row).toLowerCase();
+  const fallbackName = fileName.replace(/\.(js|py)$/i, '');
+  const plugin = (listData.plugins || []).find((item) => `${item.file || ''}`.toLowerCase() === fileName)
+    || (listData.plugins || []).find((item) => item.name === fallbackName)
+    || (listData.plugins || []).find((item) => item.title === row.title);
+  if (!plugin) {
+    throw new Error(`未识别到已安装插件文件 ${fileName || row.title}`);
+  }
+  const detailRes = await get<ApiEnvelope<{
+    dependencies: NodeDependencyRow[];
+    tool: DependencyToolStatus;
+  }>>(`/api/admin/plugin/dependencies?runtime=${encodeURIComponent(runtime)}&plugin=${encodeURIComponent(plugin.name)}`);
+  const detail = apiData(detailRes);
+  const missing = (detail.dependencies || []).filter((item) => !item.installed);
+  if (missing.length === 0) return null;
+  return {
+    runtime,
+    plugin: plugin.name,
+    pluginTitle: row.title || plugin.title || plugin.name,
+    dependencies: missing,
+    tool: detail.tool || listData.tool,
+  };
+}
+
+async function installMarketPluginDependencies(plan: PluginDependencyPlan) {
+  const messageKey = `plugin-dependencies-${plan.runtime}-${plan.plugin}`;
+  message.loading({ key: messageKey, content: `正在安装 ${plan.dependencies.length} 个依赖…`, duration: 0 });
+  const failed: string[] = [];
+  for (const dependency of plan.dependencies) {
+    try {
+      await post('/api/admin/plugin/dependency', {
+        runtime: plan.runtime,
+        plugin: plan.plugin,
+        package: dependency.name,
+        dev: dependency.dev,
+      });
+    } catch (error) {
+      failed.push(`${dependency.name}：${error instanceof Error ? error.message : '安装失败'}`);
+    }
+  }
+  if (failed.length > 0) {
+    message.error({ key: messageKey, content: `依赖安装失败：${failed.join('；')}`, duration: 6 });
+    throw new Error(failed.join('；'));
+  }
+  message.success({ key: messageKey, content: `${plan.pluginTitle} 的依赖已全部安装`, duration: 3 });
+  await Promise.all([loadPluginConfigs(), loadUser(false), loadPlugins()]);
+}
+
+async function offerPluginDependencyInstall(row: PluginInfo) {
+  const plan = await resolvePluginDependencyPlan(row);
+  if (!plan) return;
+  const names = plan.dependencies.map((item) => item.name).join('、');
+  const toolWarning = plan.tool?.available === false
+    ? `安装工具当前不可用：${plan.tool.message || (plan.runtime === 'python' ? 'pipx/Python 未就绪' : 'pnpm 未就绪')}`
+    : '';
+  Modal.confirm({
+    title: `${plan.pluginTitle} 需要安装依赖`,
+    content: h('div', { class: 'plugin-dependency-confirm' }, [
+      h('p', `检测到 ${plan.dependencies.length} 个未安装依赖：`),
+      h('p', { class: 'mono' }, names),
+      toolWarning ? h('p', { style: 'color: #d46b08' }, toolWarning) : null,
+      h('p', '是否现在自动安装？'),
+    ]),
+    okText: '自动安装',
+    cancelText: '暂不安装',
+    centered: true,
+    onOk: () => installMarketPluginDependencies(plan),
+  });
+}
 
 const dependencyRuntimeOptions = [
   { label: 'NodeJS', value: 'node' },
@@ -1567,6 +1904,14 @@ const dependencyPluginOptions = computed(() => [
   { label: `全部 ${dependencyRuntimeLabel.value} 插件`, value: '' },
   ...nodeDeps.plugins.map((item) => ({ label: `${item.title || item.name} / ${item.file || scriptFileName(item)}`, value: item.name })),
 ]);
+function showDependencyInstallResult(output: unknown) {
+  const text = String(output || '').trim();
+  if (text.includes('插件配置表单重载失败：')) {
+    message.warning(text.slice(text.lastIndexOf('插件配置表单重载失败：')));
+    return;
+  }
+  message.success('依赖已安装，插件配置表单已自动重载');
+}
 async function loadNodeDependencies(plugin = nodeDeps.plugin) {
   nodeDeps.loading = true;
   try {
@@ -1603,9 +1948,9 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
   }
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
+    const res = await post<ApiEnvelope<string>>('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: nodeDeps.plugin || '__shared__', package: pkg, dev: nodeDeps.dev });
     after?.();
-    message.success('依赖已安装');
+    showDependencyInstallResult(apiData(res));
     await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
@@ -1616,8 +1961,8 @@ async function installNodeDependencyPackage(pkg: string, after?: () => void) {
 async function installNodeDependencyRow(row: NodeDependencyRow) {
   nodeDeps.saving = true;
   try {
-    await post('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
-    message.success('依赖已安装');
+    const res = await post<ApiEnvelope<string>>('/api/admin/plugin/dependency', { runtime: nodeDeps.runtime, plugin: row.plugin || '__shared__', package: row.name, dev: row.dev });
+    showDependencyInstallResult(apiData(res));
     await loadNodeDependencies(nodeDeps.plugin);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '依赖安装失败');
@@ -1645,17 +1990,14 @@ const pluginConfigs = reactive({
   form: {} as Record<string, any>,
   text: {} as Record<string, string>,
   loading: false,
+  saving: false,
+  modalOpen: false,
+  opening: '',
 });
 const schemaFields = computed(() => {
   const props = pluginConfigs.selected?.schema?.properties || {};
   return Object.entries(props).map(([key, prop]) => ({ key, prop: prop as any }));
 });
-const pluginConfigOptions = computed(() =>
-  pluginConfigs.rows.map((row) => ({
-    value: row.uuid,
-    label: `${row.plugin || row.title || row.uuid}${row.file ? ` / ${row.file}` : ''}`,
-  })),
-);
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
@@ -1669,16 +2011,6 @@ async function loadPluginConfigs() {
   } finally {
     pluginConfigs.loading = false;
   }
-}
-function selectPluginConfig(uuid?: string) {
-  const row = pluginConfigs.rows.find((item) => item.uuid === uuid);
-  if (row) {
-    openPluginConfig(row);
-    return;
-  }
-  pluginConfigs.selected = null;
-  pluginConfigs.form = {};
-  pluginConfigs.text = {};
 }
 function openPluginConfig(row: any) {
   pluginConfigs.selected = row;
@@ -1717,9 +2049,17 @@ async function savePluginConfig() {
       }
     }
   }
-  await putPluginConfig(pluginConfigs.selected.uuid, value);
-  message.success('插件配置已保存');
-  await loadPluginConfigs();
+  pluginConfigs.saving = true;
+  try {
+    await putPluginConfig(pluginConfigs.selected.uuid, value);
+    message.success('插件配置已保存');
+    pluginConfigs.modalOpen = false;
+    await loadPluginConfigs();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '插件配置保存失败');
+  } finally {
+    pluginConfigs.saving = false;
+  }
 }
 async function putPluginConfig(uuid: string, value: Record<string, any>) {
   await put('/api/admin/plugin/config', { uuid, value });
@@ -1737,10 +2077,22 @@ type BotSettingsForm = {
   telegram_enable: boolean;
   telegram_api_base: string;
   telegram_debug: boolean;
+  dingtalk_enable: boolean;
+  dingtalk_client_id: string;
+  dingtalk_client_secret: string;
+  dingtalk_debug: boolean;
+  qqguild_enable: boolean;
+  qqguild_app_id: string;
+  qqguild_app_secret: string;
+  qqguild_sandbox: boolean;
+  qqguild_debug: boolean;
   pagermaid_enable: boolean;
   pagermaid_token: string;
   pagermaid_debug: boolean;
+  web_chat_public: boolean;
 };
+
+type BotSettingsPlatform = 'clawbot' | 'qq' | 'telegram' | 'dingtalk' | 'qqguild' | 'web' | 'pagermaid';
 
 type ClawbotLoginStart = {
   session: string;
@@ -1777,10 +2129,26 @@ const botSettings = reactive({
     telegram_enable: true,
     telegram_api_base: 'https://api.telegram.org',
     telegram_debug: false,
+    dingtalk_enable: true,
+    dingtalk_client_id: '',
+    dingtalk_client_secret: '',
+    dingtalk_debug: false,
+    qqguild_enable: true,
+    qqguild_app_id: '',
+    qqguild_app_secret: '',
+    qqguild_sandbox: false,
+    qqguild_debug: false,
     pagermaid_enable: true,
     pagermaid_token: '',
     pagermaid_debug: false,
+    web_chat_public: false,
   } as BotSettingsForm,
+});
+const botSettingsModal = reactive({
+  open: false,
+  platform: 'clawbot' as BotSettingsPlatform,
+  label: '微信 ClawBot',
+  snapshot: null as BotSettingsForm | null,
 });
 const clawbotLogin = reactive({
   open: false,
@@ -1801,6 +2169,27 @@ function clearClawbotLoginPoll() {
   if (clawbotLoginPollTimer) {
     window.clearTimeout(clawbotLoginPollTimer);
     clawbotLoginPollTimer = null;
+  }
+}
+async function openMarketPluginConfig(row: PluginInfo) {
+  if (!pluginInstalled(row)) {
+    message.info('请先安装插件后再配置');
+    return;
+  }
+  pluginConfigs.opening = row.id;
+  try {
+    await loadPluginConfigs();
+    const config = pluginConfigs.rows.find((item) => item.uuid === row.id);
+    if (!config) {
+      message.info('该插件没有可配置项');
+      return;
+    }
+    openPluginConfig(config);
+    pluginConfigs.modalOpen = true;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '插件配置加载失败');
+  } finally {
+    pluginConfigs.opening = '';
   }
 }
 
@@ -1910,15 +2299,33 @@ const botSettingsKeys = [
   'telegram.enable',
   'telegram.api_base',
   'telegram.debug',
+  'dingtalk.enable',
+  'dingtalk.client_id',
+  'dingtalk.client_secret',
+  'dingtalk.debug',
+  'qqguild.enable',
+  'qqguild.app_id',
+  'qqguild.app_secret',
+  'qqguild.sandbox',
+  'qqguild.debug',
   'pagermaid.enable',
   'pagermaid.token',
   'pagermaid.debug',
+  'sillyGirl.web_chat_public',
 ];
-const botStatusRows = computed(() => overviewAdapters.value.filter((item) => item.platform !== 'web'));
+const botStatusRows = computed(() => overviewAdapters.value);
 const oneBotReceiveURL = computed(() => {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.port === '5173' ? `${window.location.hostname}:8080` : window.location.host;
   return `${wsProtocol}://${host}/qq/receive`;
+});
+const qqGuildWebhookURL = computed(() => {
+  const host = window.location.port === '5173' ? `${window.location.hostname}:8080` : window.location.host;
+  return `${window.location.protocol}//${host}/qqguild/webhook`;
+});
+const webChatEndpointURL = computed(() => {
+  const host = window.location.port === '5173' ? `${window.location.hostname}:8080` : window.location.host;
+  return `${window.location.protocol}//${host}/api/web_chat`;
 });
 const pagermaidBridgeURL = computed(() => {
   const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1950,9 +2357,19 @@ async function loadBots() {
       telegram_enable: boolSetting(data['telegram.enable'], true),
       telegram_api_base: data['telegram.api_base'] || 'https://api.telegram.org',
       telegram_debug: boolSetting(data['telegram.debug']),
+      dingtalk_enable: boolSetting(data['dingtalk.enable'], true),
+      dingtalk_client_id: data['dingtalk.client_id'] || '',
+      dingtalk_client_secret: data['dingtalk.client_secret'] || '',
+      dingtalk_debug: boolSetting(data['dingtalk.debug']),
+      qqguild_enable: boolSetting(data['qqguild.enable'], true),
+      qqguild_app_id: data['qqguild.app_id'] || '',
+      qqguild_app_secret: data['qqguild.app_secret'] || '',
+      qqguild_sandbox: boolSetting(data['qqguild.sandbox']),
+      qqguild_debug: boolSetting(data['qqguild.debug']),
       pagermaid_enable: boolSetting(data['pagermaid.enable'], true),
       pagermaid_token: data['pagermaid.token'] || '',
       pagermaid_debug: boolSetting(data['pagermaid.debug']),
+      web_chat_public: boolSetting(data['sillyGirl.web_chat_public']),
     });
   } finally {
     botSettings.loading = false;
@@ -1961,6 +2378,21 @@ async function loadBots() {
 
 async function refreshBots() {
   await Promise.all([loadUser(false), loadBots()]);
+}
+
+function openBotSettings(row: { platform: string; label: string }) {
+  botSettingsModal.platform = row.platform as BotSettingsPlatform;
+  botSettingsModal.label = row.label;
+  botSettingsModal.snapshot = { ...botSettings.form };
+  botSettingsModal.open = true;
+}
+
+function cancelCurrentBotSettings() {
+  if (botSettingsModal.snapshot) {
+    Object.assign(botSettings.form, botSettingsModal.snapshot);
+  }
+  botSettingsModal.snapshot = null;
+  botSettingsModal.open = false;
 }
 
 async function saveBots() {
@@ -1979,9 +2411,19 @@ async function saveBots() {
       'telegram.enable': !!v.telegram_enable,
       'telegram.api_base': v.telegram_api_base || 'https://api.telegram.org',
       'telegram.debug': !!v.telegram_debug,
+      'dingtalk.enable': !!v.dingtalk_enable,
+      'dingtalk.client_id': v.dingtalk_client_id || '',
+      'dingtalk.client_secret': v.dingtalk_client_secret || '',
+      'dingtalk.debug': !!v.dingtalk_debug,
+      'qqguild.enable': !!v.qqguild_enable,
+      'qqguild.app_id': v.qqguild_app_id || '',
+      'qqguild.app_secret': v.qqguild_app_secret || '',
+      'qqguild.sandbox': !!v.qqguild_sandbox,
+      'qqguild.debug': !!v.qqguild_debug,
       'pagermaid.enable': !!v.pagermaid_enable,
       'pagermaid.token': v.pagermaid_token || '',
       'pagermaid.debug': !!v.pagermaid_debug,
+      'sillyGirl.web_chat_public': !!v.web_chat_public,
     });
     message.success('BOT 配置已保存');
     await refreshBots();
@@ -1990,10 +2432,18 @@ async function saveBots() {
   }
 }
 
+async function saveCurrentBotSettings() {
+  await saveBots();
+  botSettingsModal.snapshot = null;
+  botSettingsModal.open = false;
+}
+
 function botFormEnableKey(platform: string) {
   if (platform === 'clawbot') return 'clawbot_enable';
   if (platform === 'qq') return 'qq_enable';
   if (platform === 'telegram') return 'telegram_enable';
+  if (platform === 'dingtalk') return 'dingtalk_enable';
+  if (platform === 'qqguild') return 'qqguild_enable';
   if (platform === 'pagermaid') return 'pagermaid_enable';
   return '';
 }
@@ -2183,8 +2633,8 @@ watch([page, user], ([p]) => {
   if (p === 'plugins') {
     loadPluginSources();
     loadPlugins();
+    loadPluginConfigs();
   }
-  if (p === 'plugin-configs') loadPluginConfigs();
   if (p === 'storage') {
     loadStorageBuckets();
     loadStorage();
@@ -2274,7 +2724,7 @@ function smallcatOpenids(record?: AdminUserRow) {
 
       <Layout v-else class="shell">
         <Layout.Sider class="desktop-sider" :width="220" theme="light">
-          <div class="brand"><span class="brand-mark">S</span><span>SillyGirl</span></div>
+          <div class="brand"><span class="brand-mark" role="img" aria-label="傻妞 Logo"></span><span>SillyGirl</span></div>
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
         </Layout.Sider>
         <Layout>
@@ -2299,7 +2749,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Typography.Link :href="overviewVersion.repository" target="_blank">GitHub</Typography.Link>
                 <Button type="primary" size="small" :loading="systemUpdate.running" @click="startOnlineUpdate">
                   <template #icon><CloudDownload :size="15" /></template>
-                  更新到最新版本
+                  在线更新
                 </Button>
               </Space>
               <Row :gutter="[12, 12]">
@@ -2321,154 +2771,227 @@ function smallcatOpenids(record?: AdminUserRow) {
                 </div>
                 <div class="toolbar-right">
                   <Button @click="refreshBots"><template #icon><RefreshCw :size="16" /></template>刷新状态</Button>
-                  <Button type="primary" :loading="botSettings.saving" @click="saveBots">
-                    <template #icon><Save :size="16" /></template>保存 BOT 配置
-                  </Button>
                 </div>
               </div>
               <Spin :spinning="botSettings.loading">
-                <Table :row-key="(row:any) => row.platform" :data-source="botStatusRows" :pagination="false" size="small">
-                  <Table.Column title="平台" data-index="label" />
-                  <Table.Column title="启用状态" :width="120">
-                    <template #default="{ record }">
-                      <Tag :color="botEnabled(record) ? 'green' : 'red'">{{ botEnabled(record) ? '已开启' : '已关闭' }}</Tag>
-                    </template>
-                  </Table.Column>
-                  <Table.Column title="连接状态" :width="120">
-                    <template #default="{ record }">
-                      <Tag :color="record.online ? 'green' : 'default'">{{ record.online ? '已连接' : '未连接' }}</Tag>
-                    </template>
-                  </Table.Column>
-                  <Table.Column title="实例数" data-index="count" :width="100" />
-                  <Table.Column title="Bot ID">
-                    <template #default="{ record }">
-                      <Typography.Text class="mono">{{ record.bots_id?.length ? record.bots_id.join(', ') : '-' }}</Typography.Text>
-                    </template>
-                  </Table.Column>
-                  <Table.Column title="操作" :width="120">
-                    <template #default="{ record }">
-                      <Button v-if="botEnabled(record)" size="small" danger @click="setBotEnabled(record, false)">关闭</Button>
-                      <Button v-else size="small" type="primary" @click="setBotEnabled(record, true)">开启</Button>
-                    </template>
-                  </Table.Column>
-                </Table>
-
-                <div class="bot-config-grid">
-                  <section class="bot-config-panel">
-                    <div class="bot-config-header">
-                      <Radio :size="16" />
-                      <Typography.Text strong>微信 ClawBot</Typography.Text>
-                      <Tag :color="botStatusRows.find((item) => item.platform === 'clawbot')?.online ? 'green' : 'default'">
-                        {{ botStatusRows.find((item) => item.platform === 'clawbot')?.online ? '已连接' : '未连接' }}
-                      </Tag>
-                    </div>
-                    <Form layout="vertical">
-                      <Form.Item label="启用 ClawBot">
-                        <Switch v-model:checked="botSettings.form.clawbot_enable" />
-                      </Form.Item>
-                      <Form.Item label="Token" extra="ClawBot / OpenClaw 微信通道的 iLink bot token。保存后适配器会自动重启。">
-                        <Space.Compact style="width: 100%">
-                          <Input.Password v-model:value="botSettings.form.clawbot_token" placeholder="请输入 ClawBot Token" />
-                          <Button :loading="clawbotLogin.starting" @click="startClawbotLogin">
-                            <template #icon><QrCode :size="16" /></template>
-                            扫码获取
+                <div class="bot-card-grid">
+                  <article
+                    v-for="record in botStatusRows"
+                    :key="record.platform"
+                    class="bot-card"
+                    :class="{ 'is-online': record.online, 'is-disabled': !botEnabled(record) }"
+                  >
+                    <header class="bot-card-header">
+                      <span class="bot-card-avatar"><Bot :size="22" /></span>
+                      <div class="bot-card-heading">
+                        <strong>{{ record.label }}</strong>
+                        <span>{{ record.platform }}</span>
+                      </div>
+                      <div class="bot-card-actions">
+                        <template v-if="record.manageable !== false">
+                          <Button
+                            v-if="botEnabled(record)"
+                            class="bot-card-toggle bot-card-pause"
+                            type="text"
+                            shape="circle"
+                            :title="`暂停 ${record.label}`"
+                            :aria-label="`暂停 ${record.label}`"
+                            @click="setBotEnabled(record, false)"
+                          >
+                            <template #icon><Pause :size="18" /></template>
                           </Button>
-                        </Space.Compact>
-                      </Form.Item>
-                      <Form.Item label="API 地址" extra="默认使用腾讯 iLink API；如果你有兼容反代地址可以填写在这里。">
-                        <Input v-model:value="botSettings.form.clawbot_api_base" placeholder="https://ilinkai.weixin.qq.com" />
-                      </Form.Item>
-                      <Form.Item label="ClawBot 调试日志">
-                        <Switch v-model:checked="botSettings.form.clawbot_debug" />
-                      </Form.Item>
-                    </Form>
-                  </section>
+                          <Button
+                            v-else
+                            class="bot-card-toggle bot-card-play"
+                            type="text"
+                            shape="circle"
+                            :title="`开启 ${record.label}`"
+                            :aria-label="`开启 ${record.label}`"
+                            @click="setBotEnabled(record, true)"
+                          >
+                            <template #icon><Play :size="18" /></template>
+                          </Button>
+                        </template>
+                        <Button
+                          class="bot-card-settings"
+                          type="text"
+                          shape="circle"
+                          :title="`${record.label}设置`"
+                          :aria-label="`${record.label}设置`"
+                          @click="openBotSettings(record)"
+                        >
+                          <template #icon><Settings :size="18" /></template>
+                        </Button>
+                      </div>
+                    </header>
 
-                  <section class="bot-config-panel">
-                    <div class="bot-config-header">
-                      <Radio :size="16" />
-                      <Typography.Text strong>QQ / OneBot</Typography.Text>
-                      <Tag :color="botStatusRows.find((item) => item.platform === 'qq')?.online ? 'green' : 'default'">
-                        {{ botStatusRows.find((item) => item.platform === 'qq')?.online ? '已连接' : '未连接' }}
-                      </Tag>
+                    <div class="bot-card-status-list">
+                      <div class="bot-card-status">
+                        <CircleCheck v-if="botEnabled(record)" class="bot-status-enabled" :size="20" aria-hidden="true" />
+                        <CircleX v-else class="bot-status-disabled" :size="20" aria-hidden="true" />
+                        <span>启用状态</span>
+                        <strong :class="botEnabled(record) ? 'bot-status-enabled' : 'bot-status-disabled'">
+                          {{ botEnabled(record) ? '已启用' : '未启用' }}
+                        </strong>
+                      </div>
+                      <div class="bot-card-status">
+                        <Antenna :class="record.online ? 'bot-status-online' : 'bot-status-offline'" :size="20" aria-hidden="true" />
+                        <span>连接状态</span>
+                        <strong :class="record.online ? 'bot-status-online' : 'bot-status-offline'">
+                          {{ record.online ? '已连接' : '未连接' }}
+                        </strong>
+                      </div>
                     </div>
-                    <Form layout="vertical">
-                      <Form.Item label="启用 QQ">
-                        <Switch v-model:checked="botSettings.form.qq_enable" />
-                      </Form.Item>
-                      <Form.Item label="反向 WebSocket 地址">
-                        <Input :value="oneBotReceiveURL" readonly>
-                          <template #suffix><Typography.Text class="muted">NapCat 填这个 URL</Typography.Text></template>
-                        </Input>
-                      </Form.Item>
-                      <Form.Item label="连接密钥" extra="需要和 NapCat / OneBot 客户端配置里的 accessToken 保持一致；公网部署建议必须填写。">
-                        <Input.Password v-model:value="botSettings.form.qq_token" placeholder="请输入 QQ 连接密钥" />
-                      </Form.Item>
-                      <Form.Item label="QQ 调试日志">
-                        <Switch v-model:checked="botSettings.form.qq_debug" />
-                      </Form.Item>
-                    </Form>
-                  </section>
 
-                  <section class="bot-config-panel">
-                    <div class="bot-config-header">
-                      <Radio :size="16" />
-                      <Typography.Text strong>Telegram Bot</Typography.Text>
-                      <Tag :color="botStatusRows.find((item) => item.platform === 'telegram')?.online ? 'green' : 'default'">
-                        {{ botStatusRows.find((item) => item.platform === 'telegram')?.online ? '已连接' : '未连接' }}
-                      </Tag>
+                    <div class="bot-card-meta">
+                      <div><span>实例数</span><strong>{{ record.count || 0 }}</strong></div>
+                      <div>
+                        <span>Bot ID</span>
+                        <Typography.Text class="mono bot-card-bot-ids">{{ record.bots_id?.length ? record.bots_id.join(', ') : '-' }}</Typography.Text>
+                      </div>
+                      <div v-if="record.manageable === false"><span>类型</span><Tag color="blue">内置 BOT</Tag></div>
                     </div>
-                    <Form layout="vertical">
-                      <Form.Item label="启用 Telegram">
-                        <Switch v-model:checked="botSettings.form.telegram_enable" />
-                      </Form.Item>
-                      <Form.Item label="Token" extra="BotFather 提供的 Bot Token，保存后 Telegram 适配器会自动重启。">
-                        <Input.Password v-model:value="botSettings.form.telegram_token" placeholder="123456:ABC-DEF..." />
-                      </Form.Item>
-                      <Form.Item label="代理 API" extra="Telegram Bot API 地址，默认 https://api.telegram.org；网络不通时填写兼容反代地址。">
-                        <Input v-model:value="botSettings.form.telegram_api_base" placeholder="https://api.telegram.org" />
-                      </Form.Item>
-                      <Form.Item label="Telegram 调试日志">
-                        <Switch v-model:checked="botSettings.form.telegram_debug" />
-                      </Form.Item>
-                    </Form>
-                  </section>
-
-                  <section class="bot-config-panel">
-                    <div class="bot-config-header">
-                      <Radio :size="16" />
-                      <Typography.Text strong>Pagermaid</Typography.Text>
-                      <Tag :color="botStatusRows.find((item) => item.platform === 'pagermaid')?.online ? 'green' : 'default'">
-                        {{ botStatusRows.find((item) => item.platform === 'pagermaid')?.online ? '已连接' : '未连接' }}
-                      </Tag>
-                    </div>
-                    <div class="bot-info-list">
-                      <div>
-                        <Typography.Text class="muted">启用 Pagermaid</Typography.Text>
-                        <div><Switch v-model:checked="botSettings.form.pagermaid_enable" /></div>
-                      </div>
-                      <div>
-                        <Typography.Text class="muted">连接密钥</Typography.Text>
-                        <Input.Password v-model:value="botSettings.form.pagermaid_token" placeholder="可选，建议填写" />
-                      </div>
-                      <div>
-                        <Typography.Text class="muted">Pagermaid 调试日志</Typography.Text>
-                        <div><Switch v-model:checked="botSettings.form.pagermaid_debug" /></div>
-                      </div>
-                      <div>
-                        <Typography.Text class="muted">桥接脚本</Typography.Text>
-                        <Typography.Text class="mono block">adapters/pagermaid/sillyplus.py</Typography.Text>
-                      </div>
-                      <div>
-                        <Typography.Text class="muted">WebSocket 地址</Typography.Text>
-                        <Typography.Text class="mono block">{{ pagermaidBridgeURL }}</Typography.Text>
-                      </div>
-                    </div>
-                  </section>
+                  </article>
                 </div>
-
               </Spin>
             </section>
+
+            <Modal
+              v-model:open="botSettingsModal.open"
+              :title="`${botSettingsModal.label} 设置`"
+              width="680px"
+              ok-text="保存"
+              cancel-text="取消"
+              :confirm-loading="botSettings.saving"
+              @cancel="cancelCurrentBotSettings"
+              @ok="saveCurrentBotSettings"
+            >
+              <Spin :spinning="botSettings.loading">
+                <Form v-if="botSettingsModal.platform === 'clawbot'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用 ClawBot" html-for="bot-clawbot-enable">
+                    <Switch id="bot-clawbot-enable" v-model:checked="botSettings.form.clawbot_enable" />
+                  </Form.Item>
+                  <Form.Item label="Token" html-for="bot-clawbot-token" extra="ClawBot / OpenClaw 微信通道的 iLink bot token。保存后适配器会自动重启。">
+                    <Space.Compact style="width: 100%">
+                      <Input.Password id="bot-clawbot-token" v-model:value="botSettings.form.clawbot_token" name="clawbot-token" placeholder="请输入 ClawBot Token" />
+                      <Button :loading="clawbotLogin.starting" @click="startClawbotLogin">
+                        <template #icon><QrCode :size="16" /></template>扫码获取
+                      </Button>
+                    </Space.Compact>
+                  </Form.Item>
+                  <Form.Item label="API 地址" html-for="bot-clawbot-api" extra="默认使用腾讯 iLink API；如果你有兼容反代地址可以填写在这里。">
+                    <Input id="bot-clawbot-api" v-model:value="botSettings.form.clawbot_api_base" name="clawbot-api" placeholder="https://ilinkai.weixin.qq.com" />
+                  </Form.Item>
+                  <Form.Item label="ClawBot 调试日志" html-for="bot-clawbot-debug">
+                    <Switch id="bot-clawbot-debug" v-model:checked="botSettings.form.clawbot_debug" />
+                  </Form.Item>
+                </Form>
+
+                <Form v-else-if="botSettingsModal.platform === 'qq'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用 QQ" html-for="bot-qq-enable">
+                    <Switch id="bot-qq-enable" v-model:checked="botSettings.form.qq_enable" />
+                  </Form.Item>
+                  <Form.Item label="反向 WebSocket 地址" html-for="bot-qq-receive">
+                    <Input id="bot-qq-receive" :value="oneBotReceiveURL" readonly>
+                      <template #suffix><Typography.Text class="muted">NapCat 填这个 URL</Typography.Text></template>
+                    </Input>
+                  </Form.Item>
+                  <Form.Item label="连接密钥" html-for="bot-qq-token" extra="需要和 NapCat / OneBot 客户端配置里的 accessToken 保持一致；公网部署建议必须填写。">
+                    <Input.Password id="bot-qq-token" v-model:value="botSettings.form.qq_token" name="qq-token" placeholder="请输入 QQ 连接密钥" />
+                  </Form.Item>
+                  <Form.Item label="QQ 调试日志" html-for="bot-qq-debug">
+                    <Switch id="bot-qq-debug" v-model:checked="botSettings.form.qq_debug" />
+                  </Form.Item>
+                </Form>
+
+                <Form v-else-if="botSettingsModal.platform === 'telegram'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用 Telegram" html-for="bot-telegram-enable">
+                    <Switch id="bot-telegram-enable" v-model:checked="botSettings.form.telegram_enable" />
+                  </Form.Item>
+                  <Form.Item label="Token" html-for="bot-telegram-token" extra="BotFather 提供的 Bot Token，保存后 Telegram 适配器会自动重启。">
+                    <Input.Password id="bot-telegram-token" v-model:value="botSettings.form.telegram_token" name="telegram-token" placeholder="123456:ABC-DEF..." />
+                  </Form.Item>
+                  <Form.Item label="代理 API" html-for="bot-telegram-api" extra="默认使用 https://api.telegram.org；网络不通时填写兼容反代地址。">
+                    <Input id="bot-telegram-api" v-model:value="botSettings.form.telegram_api_base" name="telegram-api" placeholder="https://api.telegram.org" />
+                  </Form.Item>
+                  <Form.Item label="Telegram 调试日志" html-for="bot-telegram-debug">
+                    <Switch id="bot-telegram-debug" v-model:checked="botSettings.form.telegram_debug" />
+                  </Form.Item>
+                </Form>
+
+                <Form v-else-if="botSettingsModal.platform === 'dingtalk'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用钉钉" html-for="bot-dingtalk-enable">
+                    <Switch id="bot-dingtalk-enable" v-model:checked="botSettings.form.dingtalk_enable" />
+                  </Form.Item>
+                  <Form.Item label="Client ID" html-for="bot-dingtalk-client-id" extra="钉钉开放平台应用的 Client ID（原 AppKey）。适配器使用 Stream 模式，不需要公网回调地址。">
+                    <Input id="bot-dingtalk-client-id" v-model:value="botSettings.form.dingtalk_client_id" name="dingtalk-client-id" placeholder="dingxxxxxxxx" />
+                  </Form.Item>
+                  <Form.Item label="Client Secret" html-for="bot-dingtalk-secret">
+                    <Input.Password id="bot-dingtalk-secret" v-model:value="botSettings.form.dingtalk_client_secret" name="dingtalk-client-secret" placeholder="请输入 Client Secret" />
+                  </Form.Item>
+                  <Form.Item label="钉钉调试日志" html-for="bot-dingtalk-debug">
+                    <Switch id="bot-dingtalk-debug" v-model:checked="botSettings.form.dingtalk_debug" />
+                  </Form.Item>
+                </Form>
+
+                <Form v-else-if="botSettingsModal.platform === 'qqguild'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用 QQ 官方频道" html-for="bot-qqguild-enable">
+                    <Switch id="bot-qqguild-enable" v-model:checked="botSettings.form.qqguild_enable" />
+                  </Form.Item>
+                  <Form.Item label="Webhook 回调地址" html-for="bot-qqguild-webhook" extra="把该地址填入 QQ 开放平台机器人事件回调；HTTPS 由反向代理提供。">
+                    <Input id="bot-qqguild-webhook" :value="qqGuildWebhookURL" readonly />
+                  </Form.Item>
+                  <Form.Item label="AppID" html-for="bot-qqguild-app-id">
+                    <Input id="bot-qqguild-app-id" v-model:value="botSettings.form.qqguild_app_id" name="qqguild-app-id" placeholder="请输入机器人 AppID" />
+                  </Form.Item>
+                  <Form.Item label="AppSecret" html-for="bot-qqguild-secret">
+                    <Input.Password id="bot-qqguild-secret" v-model:value="botSettings.form.qqguild_app_secret" name="qqguild-app-secret" placeholder="请输入机器人 AppSecret" />
+                  </Form.Item>
+                  <Form.Item label="沙箱环境" html-for="bot-qqguild-sandbox">
+                    <Switch id="bot-qqguild-sandbox" v-model:checked="botSettings.form.qqguild_sandbox" />
+                  </Form.Item>
+                  <Form.Item label="QQ 频道调试日志" html-for="bot-qqguild-debug">
+                    <Switch id="bot-qqguild-debug" v-model:checked="botSettings.form.qqguild_debug" />
+                  </Form.Item>
+                </Form>
+
+                <Form v-else-if="botSettingsModal.platform === 'web'" layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="运行状态" html-for="bot-web-status" extra="Web Bot 是内置适配器，随 SillyGirl 自动启动。">
+                    <Switch id="bot-web-status" :checked="true" disabled />
+                  </Form.Item>
+                  <Form.Item label="允许匿名聊天" html-for="bot-web-public" extra="关闭时仅已登录的后台管理员可以发送 Web Bot 消息。">
+                    <Switch id="bot-web-public" v-model:checked="botSettings.form.web_chat_public" />
+                  </Form.Item>
+                  <Form.Item label="聊天接口" html-for="bot-web-endpoint">
+                    <Input id="bot-web-endpoint" :value="webChatEndpointURL" readonly />
+                  </Form.Item>
+                  <Button type="primary" @click="toggleWebChat">
+                    <template #icon><MessageSquare :size="16" /></template>
+                    {{ webChat.open ? '关闭聊天窗口' : '打开聊天窗口' }}
+                  </Button>
+                </Form>
+
+                <Form v-else layout="vertical" class="bot-settings-modal-form">
+                  <Form.Item label="启用 Pagermaid" html-for="bot-pagermaid-enable">
+                    <Switch id="bot-pagermaid-enable" v-model:checked="botSettings.form.pagermaid_enable" />
+                  </Form.Item>
+                  <Form.Item label="连接密钥" html-for="bot-pagermaid-token">
+                    <Input.Password id="bot-pagermaid-token" v-model:value="botSettings.form.pagermaid_token" name="pagermaid-token" placeholder="可选，建议填写" />
+                  </Form.Item>
+                  <Form.Item label="Pagermaid 调试日志" html-for="bot-pagermaid-debug">
+                    <Switch id="bot-pagermaid-debug" v-model:checked="botSettings.form.pagermaid_debug" />
+                  </Form.Item>
+                  <div class="bot-settings-readonly">
+                    <Typography.Text class="muted block">桥接脚本</Typography.Text>
+                    <Typography.Text class="mono block">adapters/pagermaid/sillyplus.py</Typography.Text>
+                  </div>
+                  <div class="bot-settings-readonly">
+                    <Typography.Text class="muted block">WebSocket 地址</Typography.Text>
+                    <Typography.Text class="mono block">{{ pagermaidBridgeURL }}</Typography.Text>
+                  </div>
+                </Form>
+              </Spin>
+            </Modal>
 
             <Modal
               v-model:open="clawbotLogin.open"
@@ -2508,7 +3031,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                     </Space>
                     <Tag>{{ realScripts.length }}</Tag>
                   </div>
-                  <Input v-model:value="scriptKeyword" allow-clear placeholder="搜索脚本文件">
+                  <Input id="script-file-search" name="script-file-search" v-model:value="scriptKeyword" allow-clear placeholder="搜索脚本文件">
                     <template #prefix><Search :size="15" /></template>
                   </Input>
                   <div class="script-file-actions">
@@ -2631,7 +3154,7 @@ function smallcatOpenids(record?: AdminUserRow) {
             <section v-if="page === 'storage'" class="panel">
               <div class="toolbar-left" style="margin-bottom: 12px">
                 <Select
-                  :value="storageState.keys"
+                  :value="storageState.bucket"
                   style="width: 220px"
                   show-search
                   allow-clear
@@ -2640,14 +3163,22 @@ function smallcatOpenids(record?: AdminUserRow) {
                   :options="storageState.buckets"
                   @change="selectStorageBucket"
                 />
-                <Input v-model:value="storageState.keys" style="width: 360px" placeholder="bucket 或 bucket.key，多个用逗号分隔" />
-                <Button type="primary" @click="loadStorage"><template #icon><Search :size="16" /></template>查询</Button>
-                <Button @click="loadStorage"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Input
+                  v-model:value="storageState.search"
+                  allow-clear
+                  style="width: 360px"
+                  placeholder="按 Key 或 Value 查询"
+                  :disabled="!selectedStorageBucket"
+                  autocomplete="off"
+                  @press-enter="loadStorage(1)"
+                />
+                <Button type="primary" @click="loadStorage(1)"><template #icon><Search :size="16" /></template>查询</Button>
+                <Button @click="loadStorage(storageState.current)"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
                 <Button :loading="storageState.creatingBucket" @click="openCreateStorageBucket">
                   <template #icon><Plus :size="16" /></template>新建桶
                 </Button>
                 <Popconfirm
-                  :title="`确认删除存储桶 ${selectedStorageBucket || storageState.keys}？`"
+                  :title="`确认删除存储桶 ${selectedStorageBucket}？`"
                   description="删除后该桶内所有键值都会被移除，无法恢复。"
                   ok-text="确认删除"
                   cancel-text="取消"
@@ -2676,7 +3207,13 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <template #icon><Plus :size="16" /></template>
                 </Button>
               </Space.Compact>
-              <Table :row-key="(row:any) => `${row.bucket}.${row.key}`" :loading="storageState.loading" :data-source="storageState.rows" :pagination="{ pageSize: 20 }">
+              <Table
+                :row-key="(row:any) => `${row.bucket}.${row.key}`"
+                :loading="storageState.loading"
+                :data-source="storageState.rows"
+                :pagination="{ current: storageState.current, pageSize: storageState.pageSize, total: storageState.total, showSizeChanger: true }"
+                @change="changeStoragePage"
+              >
                 <Table.Column title="#" data-index="index" :width="64" />
                 <Table.Column title="Bucket" data-index="bucket" :width="160" />
                 <Table.Column title="Key" data-index="key" :width="220" />
@@ -2990,8 +3527,9 @@ function smallcatOpenids(record?: AdminUserRow) {
             <section v-if="page === 'plugins'" class="panel">
               <Tabs v-model:active-key="plugins.tab" :items="[{ key: 'all', label: `全部 ${plugins.meta.all ?? ''}` }, { key: 'tab1', label: `已安装 ${plugins.meta.tab1 ?? ''}` }, { key: 'tab2', label: `未安装 ${plugins.meta.tab2 ?? ''}` }, { key: 'tab3', label: `可更新 ${plugins.meta.tab3 ?? ''}` }]" />
               <div class="toolbar-left" style="margin-bottom: 12px">
-                <Input v-model:value="plugins.keyword" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
+                <Input id="plugin-market-search" v-model:value="plugins.keyword" name="plugin-market-search" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
                 <Select
+                  id="plugin-market-class"
                   v-model:value="plugins.klass"
                   show-search
                   style="width: 180px"
@@ -3008,43 +3546,70 @@ function smallcatOpenids(record?: AdminUserRow) {
               <Spin :spinning="plugins.loading">
                 <div v-if="plugins.rows.length" class="plugin-market-grid">
                   <article v-for="record in plugins.rows" :key="record.id" class="plugin-market-card">
-                    <div class="plugin-card-icon" aria-hidden="true">
+                    <button
+                      type="button"
+                      class="plugin-card-icon"
+                      :aria-label="`查看 ${record.title || record.id} 介绍`"
+                      @click="openPluginDetail(record)"
+                    >
                       <img v-if="pluginIconIsImage(record)" :src="record.icon" :alt="record.title || record.id" />
                       <span v-else>{{ pluginInitial(record) }}</span>
-                    </div>
+                    </button>
                     <div class="plugin-card-main">
                       <div class="plugin-card-title-row">
-                        <Typography.Text strong class="plugin-card-title">{{ record.title || record.id }}</Typography.Text>
-                        <Tag v-if="record.status === 1" color="green">可更新</Tag>
+                        <button type="button" class="plugin-card-title" @click="openPluginDetail(record)">
+                          {{ record.title || record.id }}
+                        </button>
                       </div>
-                      <Tag v-if="pluginTriggerText(record)" class="plugin-card-command">
-                        <span class="plugin-card-command-text">口令 {{ pluginTriggerText(record) }}</span>
-                      </Tag>
-                      <Typography.Text class="plugin-card-desc">{{ record.desc || '无描述' }}</Typography.Text>
-                      <Typography.Text v-if="record.status === 1 && record.update_content" type="success" class="plugin-card-update">
-                        更新内容：{{ record.update_content }}
-                      </Typography.Text>
                       <div class="plugin-card-meta">
-                        <Tag :color="pluginStatusColor(record)">{{ pluginStatusLabel(record) }}</Tag>
-                        <Tag v-if="record.status === 1" color="green">新版本 {{ record.latest_version || record.version || '-' }} / 当前 {{ record.current_version || '-' }}</Tag>
-                        <Tag v-else-if="record.version">{{ record.version }}</Tag>
-                        <Tag v-for="klass in pluginClassTags(record)" :key="klass" color="cyan">{{ klass }}</Tag>
-                        <Tag v-if="record.author" color="blue">{{ record.author }}</Tag>
-                        <Tag v-if="record.running" color="green">运行中</Tag>
-                        <Tag v-if="record.disable" color="red">禁用</Tag>
+                        <Tag>{{ record.latest_version || record.version || record.current_version || '-' }}</Tag>
+                        <Tag color="cyan">{{ pluginClassTags(record).join(' / ') || '-' }}</Tag>
+                        <Tag color="gold">{{ pluginTriggerText(record) || '-' }}</Tag>
+                        <Tag color="blue">{{ record.author || '-' }}</Tag>
                       </div>
                     </div>
-                    <Button
-                      class="plugin-card-download"
-                      shape="circle"
-                      :disabled="pluginActionDisabled(record)"
-                      :loading="plugins.installing[record.id]"
-                      :title="pluginActionLabel(record)"
-                      :aria-label="pluginActionLabel(record)"
-                      @click="installPlugin(record)"
-                    >
-                      <template #icon><CloudDownload :size="20" /></template>
-                    </Button>
+                    <div class="plugin-card-actions">
+                      <Button
+                        class="plugin-card-settings"
+                        shape="circle"
+                        :disabled="!pluginInstalled(record)"
+                        :loading="pluginConfigs.opening === record.id"
+                        :title="pluginInstalled(record) ? '插件配置' : '安装后可配置'"
+                        :aria-label="`${record.title || record.id}插件配置`"
+                        @click="openMarketPluginConfig(record)"
+                      >
+                        <template #icon><Settings :size="18" /></template>
+                      </Button>
+                      <Popconfirm
+                        v-if="pluginInstalled(record)"
+                        :title="`确认卸载「${record.title || record.id}」？`"
+                        ok-text="确认卸载"
+                        cancel-text="取消"
+                        @confirm="uninstallPlugin(record)"
+                      >
+                        <Button
+                          class="plugin-card-remove"
+                          shape="circle"
+                          danger
+                          :loading="plugins.uninstalling[record.id]"
+                          :title="`卸载 ${record.title || record.id}`"
+                          :aria-label="`卸载 ${record.title || record.id}`"
+                        >
+                          <template #icon><Trash2 :size="18" /></template>
+                        </Button>
+                      </Popconfirm>
+                      <Button
+                        v-else
+                        class="plugin-card-download"
+                        shape="circle"
+                        :loading="plugins.installing[record.id]"
+                        title="安装"
+                        :aria-label="`安装 ${record.title || record.id}`"
+                        @click="installPlugin(record)"
+                      >
+                        <template #icon><CloudDownload :size="20" /></template>
+                      </Button>
+                    </div>
                   </article>
                 </div>
                 <Empty v-else description="暂无插件" />
@@ -3057,79 +3622,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                   show-less-items
                   @change="loadPlugins"
                 />
-              </Spin>
-            </section>
-
-            <section v-if="page === 'plugin-configs'" class="panel">
-              <div class="toolbar">
-                <div class="toolbar-left">
-                  <Select
-                    :value="pluginConfigs.selected?.uuid"
-                    show-search
-                    allow-clear
-                    style="width: 360px"
-                    placeholder="选择插件"
-                    :options="pluginConfigOptions"
-                    :filter-option="(input:any, option:any) => String(option?.label || '').toLowerCase().includes(String(input).toLowerCase())"
-                    @change="selectPluginConfig"
-                  />
-                  <Button @click="loadPluginConfigs"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                </div>
-                <div class="toolbar-right">
-                  <Button type="primary" :disabled="!pluginConfigs.selected || pluginConfigs.selected.registered === false" @click="savePluginConfig"><template #icon><Save :size="16" /></template>保存配置</Button>
-                </div>
-              </div>
-              <Spin :spinning="pluginConfigs.loading">
-                <div v-if="pluginConfigs.selected" class="config-form">
-                  <Typography.Title :level="4" style="margin-top: 0">{{ pluginConfigs.selected.plugin || pluginConfigs.selected.title }}</Typography.Title>
-                  <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
-                  <Alert
-                    v-if="pluginConfigs.selected.registered === false"
-                    type="warning"
-                    show-icon
-                    style="margin-top: 16px"
-                    message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new SillyGirlPluginConfig(schema) 或 form(schema) 在脚本顶层执行，且脚本初始化没有报错。"
-                  />
-                  <Form layout="vertical" style="margin-top: 16px">
-                    <template v-for="field in schemaFields" :key="field.key">
-                      <Form.Item :label="field.prop.title || field.key" :extra="field.prop.description">
-                        <Select
-                          v-if="fieldType(field.prop) === 'enum'"
-                          v-model:value="pluginConfigs.form[field.key]"
-                          :options="fieldOptions(field.prop)"
-                        />
-                        <Switch
-                          v-else-if="fieldType(field.prop) === 'boolean'"
-                          v-model:checked="pluginConfigs.form[field.key]"
-                        />
-                        <InputNumber
-                          v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
-                          v-model:value="pluginConfigs.form[field.key]"
-                          style="width: 100%"
-                          :min="field.prop.minimum"
-                          :max="field.prop.maximum"
-                        />
-                        <Input.TextArea
-                          v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
-                          v-model:value="pluginConfigs.text[field.key]"
-                          :rows="6"
-                          class="mono"
-                        />
-                        <Input.Password
-                          v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
-                          v-model:value="pluginConfigs.form[field.key]"
-                        />
-                        <Input.TextArea
-                          v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
-                          v-model:value="pluginConfigs.form[field.key]"
-                          :rows="4"
-                        />
-                        <Input v-else v-model:value="pluginConfigs.form[field.key]" />
-                      </Form.Item>
-                    </template>
-                  </Form>
-                </div>
-                <Empty v-else :description="pluginConfigs.rows.length ? '请选择一个插件查看配置。' : '暂无插件配置。插件安装后会自动注册顶层声明的 SillyGirlPluginConfig/form 配置。'" />
               </Spin>
             </section>
 
@@ -3178,10 +3670,85 @@ function smallcatOpenids(record?: AdminUserRow) {
           :body-style="{ padding: 0 }"
           :closable="false"
         >
-          <div class="brand"><span class="brand-mark">S</span><span>SillyGirl</span></div>
+          <div class="brand"><span class="brand-mark" role="img" aria-label="傻妞 Logo"></span><span>SillyGirl</span></div>
           <Menu mode="inline" :selected-keys="[page]" :items="menuItems" style="border-inline-end: 0; padding-top: 8px" @click="(e:any) => navigate(e.key)" />
         </Drawer>
       </Layout>
+
+      <div v-if="user" class="web-chat-widget">
+        <section v-if="webChat.open" class="web-chat-panel" role="dialog" aria-label="Web Bot 对话框">
+          <header class="web-chat-header">
+            <div class="web-chat-title">
+              <span class="web-chat-avatar"><Bot :size="19" /></span>
+              <div>
+                <strong>Web Bot</strong>
+                <span class="web-chat-status">
+                  <i :class="{ online: webChat.polling }"></i>
+                  {{ webChat.polling ? '在线' : '连接中' }}
+                </span>
+              </div>
+            </div>
+            <button type="button" class="web-chat-close" aria-label="关闭 Web Bot" @click="toggleWebChat">
+              <X :size="18" />
+            </button>
+          </header>
+
+          <div ref="webChatMessagesEl" class="web-chat-messages" aria-live="polite">
+            <div
+              v-for="item in webChat.messages"
+              :key="item.id"
+              class="web-chat-message-row"
+              :class="{ own: item.own, notice: item.t === 'notice' }"
+            >
+              <div class="web-chat-bubble">
+                <div v-if="item.c" class="web-chat-content">{{ item.c }}</div>
+                <div v-if="item.m?.length" class="web-chat-images">
+                  <a v-for="imageURL in item.m" :key="imageURL" :href="imageURL" target="_blank" rel="noreferrer">
+                    <img :src="imageURL" alt="Web Bot 返回图片" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="webChat.error" class="web-chat-error">{{ webChat.error }}</div>
+          <footer class="web-chat-composer">
+            <Input.TextArea
+              id="web-chat-input"
+              name="web-chat-input"
+              v-model:value="webChat.input"
+              :auto-size="{ minRows: 1, maxRows: 4 }"
+              :maxlength="2000"
+              aria-label="Web Bot 消息"
+              placeholder="输入命令，Enter 发送"
+              @keydown.enter.exact.prevent="sendWebChat"
+            />
+            <Button
+              type="primary"
+              shape="circle"
+              aria-label="发送消息"
+              :loading="webChat.sending"
+              :disabled="!webChat.input.trim()"
+              @click="sendWebChat"
+            >
+              <template #icon><Send :size="17" /></template>
+            </Button>
+          </footer>
+        </section>
+
+        <button
+          type="button"
+          class="web-chat-fab"
+          :class="{ active: webChat.open }"
+          :aria-expanded="webChat.open"
+          :aria-label="webChat.open ? '关闭 Web Bot' : '打开 Web Bot'"
+          @click="toggleWebChat"
+        >
+          <X v-if="webChat.open" :size="24" />
+          <MessageSquare v-else :size="25" />
+          <span v-if="webChat.unread" class="web-chat-unread">{{ webChat.unread > 99 ? '99+' : webChat.unread }}</span>
+        </button>
+      </div>
 
       <Modal
         v-model:open="systemUpdate.open"
@@ -3224,8 +3791,18 @@ function smallcatOpenids(record?: AdminUserRow) {
         @ok="createScript"
       >
         <Form layout="vertical">
-          <Form.Item label="脚本文件名" required extra="会创建为 /data/plugins/文件名.js 或 .py；不填写后缀会自动补全 .js。">
-            <Input v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign.js 或 daily-sign.py" @press-enter="createScript" />
+          <Form.Item label="脚本名称" html-for="script-create-name" required extra="只填写名称，系统会按下面选择的类型自动添加后缀。">
+            <Input id="script-create-name" v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign" @press-enter="createScript" />
+          </Form.Item>
+          <Form.Item label="脚本类型" html-for="script-create-suffix" required>
+            <Select
+              id="script-create-suffix"
+              v-model:value="scriptCreateState.suffix"
+              :options="[
+                { label: 'NodeJS（.js）', value: '.js' },
+                { label: 'Python（.py）', value: '.py' },
+              ]"
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -3239,7 +3816,14 @@ function smallcatOpenids(record?: AdminUserRow) {
       </Modal>
 
       <Modal :open="!!tasks.editing" title="定时任务" width="640px" @cancel="tasks.editing = null" @ok="saveTask">
-        <Form layout="vertical"><Form.Item label="标题" required help="定时任务标题不能为空"><Input v-model:value="tasks.form.title" placeholder="例如：每小时检查 IP" /></Form.Item><Form.Item label="Cron 表达式" required help="例如：0 * * * *，也支持带秒字段的 6 段表达式"><Input v-model:value="tasks.form.schedule" placeholder="0 * * * *" /></Form.Item><Form.Item label="触发命令"><Select v-model:value="tasks.form.command" show-search :options="tasks.scripts" placeholder="node xxx.js 或 python xxx.py" /></Form.Item><Form.Item label="启用"><Switch v-model:checked="tasks.form.enable" /></Form.Item></Form>
+        <Form layout="vertical">
+          <Form.Item label="标题" html-for="task-title" required help="定时任务标题不能为空"><Input id="task-title" v-model:value="tasks.form.title" name="task-title" placeholder="例如：每小时检查 IP" /></Form.Item>
+          <Form.Item label="Cron 表达式" html-for="task-schedule" required help="例如：0 * * * *，也支持带秒字段的 6 段表达式"><Input id="task-schedule" v-model:value="tasks.form.schedule" name="task-schedule" placeholder="0 * * * *" /></Form.Item>
+          <Form.Item label="触发命令" html-for="task-command"><Select id="task-command" v-model:value="tasks.form.command" show-search :options="tasks.scripts" placeholder="node xxx.js 或 python xxx.py" /></Form.Item>
+          <Form.Item label="接收平台" html-for="task-platform"><Select id="task-platform" v-model:value="tasks.form.platform" allow-clear :options="tasks.platforms" placeholder="选择 BOT 平台" /></Form.Item>
+          <Form.Item label="接收人 ID" html-for="task-recipient" help="填写该平台的用户 ID；插件调用 s.reply() 时会私聊此账号"><Input id="task-recipient" v-model:value="tasks.form.recipient" name="task-recipient" allow-clear placeholder="请输入用户 ID / OpenID" /></Form.Item>
+          <Form.Item label="启用" html-for="task-enable"><Switch id="task-enable" v-model:checked="tasks.form.enable" /></Form.Item>
+        </Form>
       </Modal>
 
       <Modal :open="!!carry.editing" title="搬运群组" width="820px" @cancel="carry.editing = null" @ok="saveCarry">
@@ -3305,6 +3889,131 @@ function smallcatOpenids(record?: AdminUserRow) {
             <Button @click="plugins.sourceModal = false">关闭</Button>
           </div>
         </Space>
+      </Modal>
+
+      <Modal
+        v-model:open="plugins.detailOpen"
+        :title="plugins.detail?.title || plugins.detail?.id || '插件介绍'"
+        width="640px"
+        :footer="null"
+      >
+        <div v-if="plugins.detail" class="plugin-detail">
+          <div class="plugin-detail-header">
+            <div class="plugin-detail-icon" aria-hidden="true">
+              <img v-if="pluginIconIsImage(plugins.detail)" :src="plugins.detail.icon" alt="" />
+              <span v-else>{{ pluginInitial(plugins.detail) }}</span>
+            </div>
+            <div class="plugin-detail-heading">
+              <Typography.Title :level="4">{{ plugins.detail.title || plugins.detail.id }}</Typography.Title>
+              <Space wrap size="small">
+                <Tag :color="pluginStatusColor(plugins.detail)">{{ pluginStatusLabel(plugins.detail) }}</Tag>
+                <Tag v-if="plugins.detail.version">{{ plugins.detail.version }}</Tag>
+                <Tag v-for="klass in pluginClassTags(plugins.detail)" :key="klass" color="cyan">{{ klass }}</Tag>
+              </Space>
+            </div>
+          </div>
+
+          <Typography.Paragraph class="plugin-detail-description">
+            {{ plugins.detail.desc || '该插件暂未填写介绍。' }}
+          </Typography.Paragraph>
+
+          <Alert
+            v-if="plugins.detail.status === 1 && plugins.detail.update_content"
+            type="success"
+            show-icon
+            :message="`更新内容：${plugins.detail.update_content}`"
+          />
+
+          <dl class="plugin-detail-meta">
+            <template v-if="pluginTriggerText(plugins.detail)">
+              <dt>触发口令</dt>
+              <dd class="mono">{{ pluginTriggerText(plugins.detail) }}</dd>
+            </template>
+            <template v-if="plugins.detail.author">
+              <dt>作者</dt>
+              <dd>{{ plugins.detail.author }}</dd>
+            </template>
+            <template v-if="plugins.detail.status === 1">
+              <dt>版本</dt>
+              <dd>当前 {{ plugins.detail.current_version || '-' }} / 最新 {{ plugins.detail.latest_version || plugins.detail.version || '-' }}</dd>
+            </template>
+            <template v-if="plugins.detail.organization">
+              <dt>来源</dt>
+              <dd>{{ plugins.detail.organization }}</dd>
+            </template>
+          </dl>
+        </div>
+      </Modal>
+
+      <Modal
+        v-model:open="pluginConfigs.modalOpen"
+        :title="`${pluginConfigs.selected?.plugin || pluginConfigs.selected?.title || '插件'} 配置`"
+        width="720px"
+        ok-text="保存配置"
+        cancel-text="取消"
+        :confirm-loading="pluginConfigs.saving"
+        :ok-button-props="{ disabled: !pluginConfigs.selected || pluginConfigs.selected.registered === false }"
+        @ok="savePluginConfig"
+      >
+        <Spin :spinning="pluginConfigs.loading">
+          <div v-if="pluginConfigs.selected" class="config-form plugin-config-modal-form">
+            <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
+            <Alert
+              v-if="pluginConfigs.selected.registered === false"
+              type="warning"
+              show-icon
+              style="margin-top: 16px"
+              message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new SillyGirlPluginConfig(schema) 或 form(schema) 在脚本顶层执行，且脚本初始化没有报错。"
+            />
+            <Form layout="vertical" style="margin-top: 16px">
+              <template v-for="field in schemaFields" :key="field.key">
+                <Form.Item :label="field.prop.title || field.key" :html-for="`plugin-config-${field.key}`" :extra="field.prop.description">
+                  <Select
+                    v-if="fieldType(field.prop) === 'enum'"
+                    :id="`plugin-config-${field.key}`"
+                    v-model:value="pluginConfigs.form[field.key]"
+                    :options="fieldOptions(field.prop)"
+                  />
+                  <Switch
+                    v-else-if="fieldType(field.prop) === 'boolean'"
+                    :id="`plugin-config-${field.key}`"
+                    v-model:checked="pluginConfigs.form[field.key]"
+                  />
+                  <InputNumber
+                    v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
+                    :id="`plugin-config-${field.key}`"
+                    v-model:value="pluginConfigs.form[field.key]"
+                    style="width: 100%"
+                    :min="field.prop.minimum"
+                    :max="field.prop.maximum"
+                  />
+                  <Input.TextArea
+                    v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
+                    :id="`plugin-config-${field.key}`"
+                    :name="field.key"
+                    v-model:value="pluginConfigs.text[field.key]"
+                    :rows="6"
+                    class="mono"
+                  />
+                  <Input.Password
+                    v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
+                    :id="`plugin-config-${field.key}`"
+                    :name="field.key"
+                    v-model:value="pluginConfigs.form[field.key]"
+                  />
+                  <Input.TextArea
+                    v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
+                    :id="`plugin-config-${field.key}`"
+                    :name="field.key"
+                    v-model:value="pluginConfigs.form[field.key]"
+                    :rows="4"
+                  />
+                  <Input v-else :id="`plugin-config-${field.key}`" :name="field.key" v-model:value="pluginConfigs.form[field.key]" />
+                </Form.Item>
+              </template>
+            </Form>
+          </div>
+        </Spin>
       </Modal>
 
       <Modal :open="!!qinglong.editing" title="青龙面板" width="720px" :confirm-loading="qinglong.saving" @cancel="qinglong.editing = null" @ok="saveQinglongPanel">
