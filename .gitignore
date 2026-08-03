@@ -54,3 +54,4 @@ security-pentest/
 **/__pycache__/
 /skills.md
 .codex/
+/.monkeycode/
