@@ -17,84 +17,98 @@ Use this skill to write SillyGirl script plugins for this repository.
 const {
   sender: s,
   Bucket,
-  QingLong,
-  SmallCat,
-  DaiDai,
-  sillyGirlCreateSchema,
-  SillyGirlPluginConfig,
+  container,
   form,
-  sleep,
-  restart,
-  update,
+  utils,
 } = require('sillygirl');
+
 ```
+
+Use `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })` for panel clients. Use `utils.userList()`, `utils.sleep()`, `utils.version()`, `utils.restart()`, `utils.update()` for system helpers.
 
 - Import Python runtime APIs from `sillygirl`:
 
 ```python
-from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update
+from sillygirl import sender as s, Bucket, container, form, utils
+
 ```
+
+Use `container.QingLong({"id": 1})`, `container.SmallCat({"id": 1})`, `container.DaiDai({"id": 1})`.
 
 - Do not use Goja-only APIs or BNCR globals.
 - Do not use `BncrDB`, `BncrCreateSchema`, or `BncrPluginConfig`.
 - Do not invent wrappers that change third-party API response shapes. Return or reply with the original API meaning unless the user asks for formatting.
 - Prefer `async function main() { ... }` and end with `main().catch(...)`.
 - Always handle exceptions and reply with a useful error message.
-- Never hard-code secrets in plugin code. Use `SillyGirlPluginConfig`, `Bucket`, or environment variables.
-- Declare third-party dependencies with `@depe ["package"]`; NodeJS uses pnpm, Python uses pipx.
+- Never hard-code secrets in plugin code. Use `new form({...})`, `Bucket`, or environment variables.
+- Declare third-party dependencies with new-style `[depe: ["axios"]]` / `[depe: ["requests"]]`; legacy `@depe ...` metadata is still detected for migration. NodeJS uses pnpm, Python uses pipx. 
+
+> 迁移旧插件时不要依赖外部兼容脚本，也不要随插件安装额外文件；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`container`、`utils`、`form` 等现有能力。
+Do not use `[param: {...}]`; plugin configuration must use top-level `new form({...})` in NodeJS or `form({...})` in Python.
 
 ## Metadata Header
 
-Every plugin should start with a block comment:
+New-style plugins should start with square-bracket metadata comments. NodeJS uses `// [key: value]`; Python uses `# [key: value]`. Spacing after `//` or `#` is optional.
+
+```js
+// [title: 插件标题]
+// [name: pluginFileName]
+// [description: 插件说明]
+// [author: 作者]
+// [version: v1.0.0]
+// [rule: ^命令$]
+// [public: true]
+// [class: 工具]
+// [depe: ["axios"]]
+```
+
+```python
+# [title: Python插件标题]
+# [name: pythonPluginFileName]
+# [description: 插件说明]
+# [author: 作者]
+# [version: v1.0.0]
+# [rule: raw ^命令$]
+# [public: true]
+# [class: 工具]
+# [depe: ["requests"]]
+```
+
+Legacy `@title ...` comments are accepted for migration compatibility, but new plugins should use the `[title: ...]` style above.
 
 ```js
 /**
- * @title 插件标题
- * @author 作者
- * @version v1.0.0
- * @desc 插件说明
- * @rule raw ^命令$
- * @admin false
- * @priority 100
+ * @title Legacy Node
+ * @desc Legacy description
+ * @rule ^legacy$
+ * @depe ["axios"]
  */
 ```
+
+Do not write `[param: {...}]`; it is intentionally ignored. Use `form` for all plugin settings.
 
 Supported metadata:
 
 | Tag | Required | Meaning |
 | --- | --- | --- |
-| `@title 标题` | Recommended | Display name in Admin and plugin market. |
-| `@author 作者` | Optional | Plugin author. |
-| `@version v1.0.0` | Optional | Plugin version. |
-| `@desc 说明` | Optional | Plugin description. Use `@desc`, not `@description`. |
-| `@icon URL` | Optional | Plugin icon URL. If omitted, SillyGirl uses the default apple icon. |
-| `@rule 规则` | Required for message plugins | Message trigger. Can appear multiple times. |
-| `@admin true/false` | Optional | Whether only admins can trigger it. |
-| `@priority 数字` | Optional | Match priority; lower/higher behavior follows project parser. |
-| `@cron 表达式` | Required for cron plugins | Cron expression only, for example `@cron 0 9 * * *`. Do not append platform. |
-| `@web true/false` | Required for web daemon plugins | Whether the plugin stays running. The plugin must listen on its own port in code. |
-| `@carry true` | Required for carry handlers | Makes the plugin selectable as a carry processing script. |
-| `@module true` | Optional | Utility/module file, not a normal message handler. |
-| `@on_start true` | Optional | Run once on startup. |
+| `[title: 标题]` | Recommended | Display name in Admin and plugin market; legacy `@title` metadata is still accepted. |
+| `[name: pluginFileName]` | Required for local market creation | Script file name without suffix. |
+| `[author: 作者]` | Optional | Plugin author. |
+| `[version: v1.0.1]` | Optional | Plugin version. |
+| `[description: 说明]` | Optional | Plugin description. `[desc: ...]` is accepted for compatibility. |
+| `[icon: URL]` | Optional | Plugin icon URL. If omitted, SillyGirl uses the default apple icon. |
+| `[rule: 规则]` | Required for message plugins | Message trigger. Can appear multiple times. |
+| `[admin: true/false]` | Optional | Whether only admins can trigger it. |
+| `[class: 分类]` | Optional | Plugin market category. |
+| `[public: true/false]` | Optional | Whether it can be listed publicly. Local manual creation is forced to false. |
+| `[cron: 表达式]` | Optional | Cron expression only. |
+| `[web: true/false]` | Optional | Whether the plugin stays running. |
+| `[carry: true]` | Optional | Makes the plugin selectable as a carry processing script. |
+| `[module: true]` | Optional | Utility/module file, not a normal message handler. |
+| `[on_start: true]` | Optional | Run once on startup. |
+| `[depe: ["pkg"]]` | Optional | Runtime dependencies. |
 
-Do not use these removed/legacy tags:
-
-- `@name`
-- `@disable`
-- `@message`
-- `@service`
-- `@create_at`
-- `@form`
-- `@encrypt`
-- `@paterner`
-- `@http`
-- `@findall`
-- `@match`
-- `@regex`
-- `@pattern`
-- `@groupId`, `@groupId-`
-- `@userId`, `@userId-`
-- `@platform`, `@platform-`
+Do not use removed/legacy tags such as `[param: ...]`, `@name`, `@form`, `@encrypt`, `@http`, `@findall`, `@match`, `@regex`, `@pattern`.
 
 ## Rule Patterns
 
@@ -179,22 +193,26 @@ Use one bucket per plugin or feature. Avoid writing to shared buckets like `sill
 
 ## Plugin Configuration
 
-Use `sillyGirlCreateSchema` plus `new SillyGirlPluginConfig(schema)` or `form(schema)` at top level.
+Use only the chain-style `new form({...})` at top level. Do not use raw JSON Schema, `utils.schema`, `form.schema`, `SillyGirlPluginConfig`, or `setTitle/setDefault/setEnum` aliases.
 
 ```js
-const schema = sillyGirlCreateSchema.object({
-  apiBase: sillyGirlCreateSchema.string().title('接口地址').default(''),
-  token: sillyGirlCreateSchema.string().title('Token').format('password').default(''),
-});
+const { form } = require('sillygirl');
 
-const Config = new SillyGirlPluginConfig(schema);
+const Config = new form({
+  apiBase: form.string().title('接口地址').default(''),
+  token: form.string().title('Token').format('password').default(''),
+  open: form.boolean().title('是否启用').default(false),
+  mode: form.select([{ label: '自动', value: 'auto' }, { label: '手动', value: 'manual' }])
+    .title('模式')
+    .default('auto'),
+});
 ```
 
 Read config values:
 
 ```js
-const apiBase = await Config.get('apiBase', '');
-const token = await Config.get('token', '');
+const values = await Config.get();
+const token = values.token || '';
 ```
 
 Config registration must run at plugin load time, not inside a branch that may never execute.
@@ -207,10 +225,12 @@ Python plugin header:
 
 ```python
 """
-* @title Python示例
-* @rule raw ^你好$
-* @version v1.0.0
-* @depe ["requests"]
+"""
+@title Python示例
+@rule raw ^你好$
+@version v1.0.1
+@depe ["requests"]
+"""
 """
 ```
 
@@ -219,7 +239,7 @@ Runtime facts:
 - Python version is fixed to 3.12.
 - Built-in runtime dependencies are `grpcio==1.83.0` and `protobuf==7.35.1`.
 - Third-party dependencies are installed by pipx into `/data/plugins/python_packages`.
-- Standard-library modules such as `os`, `sys`, `json`, `asyncio`, `time`, and `pathlib` should not be listed in `@depe`.
+- Standard-library modules such as `os`, `sys`, `json`, `asyncio`, `time`, and `pathlib` should not be listed in `@depe ...`.
 - All SDK calls are async and must be awaited.
 
 Minimal Python plugin:
@@ -228,7 +248,7 @@ Minimal Python plugin:
 """
 * @title Python你好
 * @rule raw ^你好$
-* @version v1.0.0
+* @version v1.0.1
 """
 
 import asyncio
@@ -245,13 +265,13 @@ asyncio.run(main())
 Python inline clients:
 
 ```python
-ql = QingLong({"id": 1})
+ql = container.QingLong({"id": 1})
 envs = await ql.getEnvs({"searchValue": "JD_COOKIE"})
 
-sc = SmallCat({"id": 1})
+sc = container.SmallCat({"id": 1})
 code = await sc.getCode({"openid": "openid", "appid": "wx123"})
 
-dd = DaiDai({"id": 1})
+dd = container.DaiDai({"id": 1})
 items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 ```
 
@@ -260,17 +280,17 @@ items = await dd.getEnvs({"keyword": "JD_COOKIE"})
 Constructors use object parameters only:
 
 ```js
-const ql = new QingLong({ id: 1 });
-const sc = new SmallCat({ id: 1 });
-const dd = new DaiDai({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 ```
 
 Do not write:
 
 ```js
-new QingLong(1);
-new SmallCat(1);
-new DaiDai(1);
+new container.QingLong(1);
+new container.SmallCat(1);
+new container.DaiDai(1);
 ```
 
 ### QingLong
@@ -323,7 +343,7 @@ For HTTP plugins:
 /**
  * @title Web 示例
  * @web true
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const http = require('http');
@@ -349,7 +369,7 @@ Python HTTP plugin:
 """
 * @title PythonWeb示例
 * @web true
-* @version v1.0.0
+* @version v1.0.1
 """
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -387,7 +407,7 @@ Carry handlers must include `@carry true` so Admin can select them:
 /**
  * @title 搬运处理
  * @carry true
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const { sender: s } = require('sillygirl');
@@ -408,7 +428,7 @@ Cron plugins should include `@cron`:
 /**
  * @title 每日提醒
  * @cron 0 9 * * *
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const { sender: s } = require('sillygirl');
@@ -431,10 +451,10 @@ main().catch(err => console.error(err));
 
 Before finishing a plugin:
 
-- Header uses `@title`, not `@name`.
-- Description uses `@desc`, not `@description`.
+- Header uses new-style `[title: ...]` and `[name: pluginFileName]`; legacy `@title ...` is accepted only for migration.
+- Description uses `[description: ...]`; `[desc: ...]` is accepted for compatibility.
 - No BNCR names remain.
-- Constructors are `new QingLong({ id })`, `new SmallCat({ id })`, `new DaiDai({ id })`.
+- Constructors are `new container.QingLong({ id })`, `new container.SmallCat({ id })`, `new container.DaiDai({ id })`.
 - `SmallCat.checkQr` is spelled correctly.
 - Sensitive commands check admin permission.
 - External requests have timeouts or are wrapped in try/catch.

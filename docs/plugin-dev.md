@@ -74,6 +74,8 @@ asyncio.run(main())
 
 Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置表单、定时任务和插件市场逻辑。差别主要在运行时和 SDK 调用方式。
 
+插件市场支持直接新增本地非公开插件：点击插件市场工具栏“新增插件”会打开源码编辑器，保存时必须包含新式 `[title: xxx]`、`[name: 文件名]`、`[description: xxx]`、`[version: vx.y.z]`，并至少包含 `[rule: xxx]` 或 `[cron: xxx]`/`[on_start: true]`/`[web: true]` 之一；系统会强制写入/修正为 `[public: false]`。已安装插件卡片图标也可打开同款源码编辑器，支持格式化、保存和删除。旧式 `@title` 注释仍兼容。
+
 ### 运行环境
 
 | 项目 | 说明 |
@@ -81,7 +83,7 @@ Python 插件和 NodeJS 插件共用同一套元数据、规则匹配、配置�
 | Python 版本 | 固定使用 Python 3.12。Docker 镜像已内置；本地 `go run` 时需要机器上能执行 `python3.12`，或配置 `SILLYGIRL_PYTHON_BIN` |
 | SDK 路径 | 程序会把 `sillygirl.py`、`srpc_pb2.py`、`srpc_pb2_grpc.py` 加入 `PYTHONPATH`，插件直接 `from sillygirl import ...` |
 | gRPC 依赖 | 运行时自动准备 `grpcio==1.83.0`、`protobuf==7.35.1` |
-| 第三方依赖 | 通过 `@depe ["包名"]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python |
+| 第三方依赖 | 通过新式 `[depe: ["包名"]]` 声明；安装、卸载和查看在 Admin 面板「依赖管理」里选择 Python；旧式 `@depe` 仍兼容 |
 | 依赖管理 | Python 依赖由 pipx 管理，统一安装到 `/data/plugins/python_packages`，所有 Python 插件共享 |
 | 文件结构 | 推荐 `/data/plugins/插件名.py` 扁平文件；插件市场按索引 `path` 写入同名 `.py` 文件 |
 
@@ -121,7 +123,7 @@ s.reply("收到")
 ### 常用 API
 
 ```python
-from sillygirl import sender as s, Bucket, QingLong, SmallCat, DaiDai, pushAdmin, restart, update
+from sillygirl import sender as s, Bucket, container, utils
 
 content = await s.getContent()
 user_id = await s.getUserId()
@@ -130,30 +132,30 @@ platform = await s.getPlatform()
 is_admin = await s.isAdmin()
 city = await s.param("城市")
 await s.reply("文本")
-await pushAdmin("管理员通知")
-await restart()
-update_result = await update({"restart": True})
+await s.pushAdmin("管理员通知")
+await utils.restart()
+update_result = await utils.update({"restart": True})
 ```
 
 ### 普通用户列表
 
-顶层 `userList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
+`utils.userList()` 提供普通用户及当前插件的授权和绑定状态。`authorized` 只表示当前插件的 `smallcat:read` 授权，运行时会从当前插件上下文判定，不接受插件 UUID 参数。
 
 ```js
-const { userList, SmallCat } = require("sillygirl");
+const { container, utils } = require("sillygirl");
 
-const users = await userList();
+const users = await utils.userList();
 const openids = users
   .filter((user) => !user.disabled && user.authorized)
   .flatMap((user) => user.bindings.smallcat_openids);
 
-const accounts = await new SmallCat({ id: 1 }).userList();
+const accounts = await new container.SmallCat({ id: 1 }).userList();
 ```
 
 ```python
-from sillygirl import userList, SmallCat
+from sillygirl import container, utils
 
-users = await userList()
+users = await utils.userList()
 openids = [
     openid
     for user in users
@@ -161,10 +163,10 @@ openids = [
     for openid in user["bindings"]["smallcat_openids"]
 ]
 
-accounts = await SmallCat({"id": 1}).userList()
+accounts = await container.SmallCat({"id": 1}).userList()
 ```
 
-`userList()` 的每个用户包含：
+`utils.userList()` 的每个用户包含：
 
 ```json
 {
@@ -203,22 +205,20 @@ await db.delete("count")
 Python 插件支持和 NodeJS 一样的声明式配置。配置对象建议在文件顶层创建，这样插件安装后触发一次规则或设置 `@on_start true` 时，后台「插件配置」就能注册到表单。
 
 ```python
-from sillygirl import sender as s, sillyGirlCreateSchema, SillyGirlPluginConfig
+from sillygirl import sender as s, form
 
-schema = sillyGirlCreateSchema.object({
-    "apiBase": sillyGirlCreateSchema.string()
-        .setTitle("接口地址")
-        .setDefault("http://127.0.0.1:8081"),
-    "token": sillyGirlCreateSchema.string()
-        .setTitle("Token")
-        .setFormat("password")
-        .setDefault(""),
-    "enabled": sillyGirlCreateSchema.boolean()
-        .setTitle("启用")
-        .setDefault(False),
+config = form({
+    "apiBase": form.string()
+        .title("接口地址")
+        .default("http://127.0.0.1:8081"),
+    "token": form.string()
+        .title("Token")
+        .format("password")
+        .default(""),
+    "enabled": form.boolean()
+        .title("启用")
+        .default(False),
 })
-
-config = SillyGirlPluginConfig(schema)
 
 
 async def main():
@@ -230,29 +230,27 @@ async def main():
 
 ### 依赖声明
 
-第三方 Python 包写在 `@depe`，格式是 JSON 数组：
+第三方 Python 包写在新式 `[depe: ...]`，值是 JSON 数组：
 
 ```python
 """
-* @title HTTP 示例
-* @rule raw ^请求测试$
-* @depe ["requests"]
+# [title: HTTP 示例]
+# [rule: raw ^请求测试$]
+# [depe: ["requests"]]
 """
 ```
 
 支持版本约束：
 
 ```python
-"""
-* @depe ["requests==2.32.0", "beautifulsoup4"]
-"""
+# [depe: ["requests==2.32.0", "beautifulsoup4"]]
 ```
 
 注意：
 
-- `os`、`sys`、`json`、`asyncio`、`time`、`pathlib` 等标准库不要写进 `@depe`。
+- `os`、`sys`、`json`、`asyncio`、`time`、`pathlib` 等标准库不要写进 `[depe: ...]`。
 - Python 依赖是共享安装，卸载依赖前确认没有其他插件还在使用。
-- 插件仓库的索引 `dependencies` 字段由插件注释里的 `@depe` 生成；没有索引时，SillyGirl 会保底读取脚本注释。
+- 插件仓库的索引 `dependencies` 字段由插件注释里的新式 `[depe: ...]` 生成；没有索引时，SillyGirl 会保底读取脚本注释，也兼容旧式 `@depe ...`。
 
 ### Python 定时任务
 
@@ -356,14 +354,70 @@ if (content === "你好") {
 | `web` | boolean | 否 | `true` 时作为 Web 常驻脚本启动；端口和路由由脚本内 Express 自己处理 |
 | `module` | boolean | 否 | `true` 时表示为模块插件，不响应消息规则 |
 | `carry` | boolean | 否 | 写 `@carry` 或 `@carry true` 时可作为 Admin 面板「搬运」里的处理脚本；`@carry false` 表示关闭 |
-| `version` | string | 否 | 版本号，如 `v1.0.0` |
+| `version` | string | 否 | 版本号，如 `v1.0.1` |
 | `author` | string | 否 | 作者名 |
 | `desc` | string | 否 | 插件描述 |
-| `depe` | JSON array | 否 | 插件依赖声明，例如 `@depe ["ipp"]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装 |
+| `depe` | JSON array | 否 | 插件依赖声明，例如 `[depe: ["ipp"]]`；NodeJS 依赖由 pnpm 安装，Python 依赖由 pipx 安装；旧式 `@depe` 兼容 |
 | `icon` | string | 否 | 插件图标 URL，未填写时使用默认苹果图标 |
 | `public` | boolean | 否 | `true` 时允许发布到插件市场 |
 | `disable` | boolean | 否 | `true` 时禁用插件 |
 | `admin` | boolean | 否 | `true` 时仅管理员可触发 |
+
+
+### 新式方括号注释
+
+新式注释使用 `[key: value]` 元数据。NodeJS 用 `// [title: ...]`，Python 用 `# [title: ...]`；`//[title: ...]` / `#[title: ...]` 不带空格也能解析。
+
+NodeJS 新式写法：
+
+```js
+// [title: 新式插件]
+// [name: newPlugin]
+// [description: 新式说明]
+// [rule: ^新式命令$]
+// [version: v1.0.0]
+// [author: admin]
+// [class: 工具]
+// [depe: ["axios"]]
+```
+
+Python 新式写法：
+
+```python
+# [title: 新式Python插件]
+# [name: newPythonPlugin]
+# [description: 新式说明]
+# [rule: ^新式命令$]
+# [cron: 12 8 * * *]
+# [version: v1.0.0]
+# [depe: ["requests"]]
+```
+
+兼容字段包括：`title`、`name`、`description`（等同 `desc`）、`rule`、`cron`、`admin`、`priority`、`version`、`author`、`class`、`public`、`icon`、`module`、`carry`、`on_start`、`web`、`smallcat`、`depe` 等。新插件建议使用 `[title: ...]` / `[rule: ...]` / `[depe: ...]` 形式。
+
+### 旧式 `@` 注释兼容
+
+旧式 `@title ...` / `@rule ...` / `@depe ...` 仍兼容读取，但新插件不再推荐使用。
+
+```js
+/**
+ * @title 旧式插件
+ * @desc 旧式说明
+ * @rule ^旧式命令$
+ * @depe ["axios"]
+ */
+```
+
+```python
+r"""
+@title 旧式Python插件
+@desc 旧式说明
+@rule raw ^旧式命令$
+@depe ["requests"]
+"""
+```
+
+`[param: {...}]` 已废弃且不再解析；插件配置必须使用 `form`：NodeJS 顶层 `new form({...})`，Python 顶层 `form({...})`。
 
 ### 元数据示例
 
@@ -372,7 +426,7 @@ if (content === "你好") {
  * @title 每日早报
  * @rule raw ^早报$
  * @priority 10
- * @version v1.2.0
+ * @version v1.2.1
  * @author cdle
  * @desc 每天早上9点推送新闻早报
  * @depe ["axios"]
@@ -383,7 +437,7 @@ if (content === "你好") {
 
 ### Web 服务脚本
 
-`@web` 只支持 `true` 或 `false`。写 `@web true` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件可以使用内置 `http` 模块或通过 `@depe` 自行声明 Web 框架；Python 插件可以使用 Python HTTP 框架或标准库自行监听。
+`[web: true]` / 旧式 `@web true` 只支持 `true` 或 `false`。写 `[web: true]` 后，SillyGirl 会在启动或脚本重载时把该脚本作为常驻脚本进程运行；HTTP 端口、路由前缀和监听逻辑全部由脚本自己决定。NodeJS 插件可以使用内置 `http` 模块或通过 `[depe: ...]` 自行声明 Web 框架；Python 插件可以使用 Python HTTP 框架或标准库自行监听。旧式 `@web` / `@depe` 仍兼容。
 
 ```js
 /**
@@ -529,10 +583,9 @@ bucket.len();        // 获取键数量（number）
 
 **作用域说明**：每个 Bucket 是独立的命名空间，不同插件建议使用不同的 Bucket 名称，避免键冲突。
 
-### sillyGirlCreateSchema / SillyGirlPluginConfig
+### form 配置表单
 
-SillyGirl 支持声明式插件配置。插件可以用 `sillyGirlCreateSchema` 构造 JSON Schema，再用
-`new SillyGirlPluginConfig(schema)` 或 `form(schema)` 绑定当前插件配置。后台会在「插件配置」页面展示已注册的配置表单。
+SillyGirl 支持声明式插件配置。Node 插件推荐直接用顶层 `form`：`new form({...})` 注册并读取配置，不需要再从 `utils` 取 schema。`form.string()` / `form.boolean()` / `form.select()` 等 helper 会生成配置表单结构；后台会在「插件设置」弹窗展示已注册的配置表单。
 
 ```js
 /**
@@ -540,25 +593,25 @@ SillyGirl 支持声明式插件配置。插件可以用 `sillyGirlCreateSchema` 
  * @rule raw ^配置测试$
  */
 
-const schema = sillyGirlCreateSchema.object({
-  host: sillyGirlCreateSchema.string()
-    .setTitle("服务地址")
-    .setDescription("例如 http://127.0.0.1:9090")
-    .setDefault("http://127.0.0.1:9090"),
-  open: sillyGirlCreateSchema.boolean()
-    .setTitle("启用开关")
-    .setDefault(false),
-  delTime: sillyGirlCreateSchema.number()
-    .setTitle("撤回时间")
-    .setDescription("0 表示不撤回")
-    .setDefault(0),
-  mode: sillyGirlCreateSchema.string()
-    .setTitle("模式")
-    .setEnum(["normal", "fast"])
-    .setEnumNames(["普通", "快速"]),
-});
+const { sender: s, form } = require("sillygirl");
 
-const ConfigDB = new SillyGirlPluginConfig(schema);
+const ConfigDB = new form({
+  host: form.string()
+    .title("服务地址")
+    .description("例如 http://127.0.0.1:9090")
+    .default("http://127.0.0.1:9090"),
+  open: form.boolean()
+    .title("启用开关")
+    .default(false),
+  delTime: form.number()
+    .title("撤回时间")
+    .description("0 表示不撤回")
+    .default(0),
+  mode: form.select([
+    { label: "普通", value: "normal" },
+    { label: "快速", value: "fast" },
+  ]).title("模式"),
+});
 
 ConfigDB.get();
 if (!Object.keys(ConfigDB.userConfig).length) {
@@ -568,22 +621,36 @@ if (!Object.keys(ConfigDB.userConfig).length) {
 }
 ```
 
+`new form({...})` 的对象参数固定使用字段名到 `form.*()` helper 的映射；不要传原生 JSON Schema。需要嵌套对象时只用 `form.object({...})`。
+
+支持的 helper：
+
+| helper | 说明 |
+|------|------|
+| `form.string()` | 字符串字段 |
+| `form.number()` | 数字字段 |
+| `form.integer()` | 整数字段 |
+| `form.boolean()` | 布尔开关 |
+| `form.array(item)` | 数组字段 |
+| `form.object(props)` | 对象字段 |
+| `form.select(options)` | 下拉/单选候选值，支持 `[{ label, value }]` 或 `{ value: label }` |
+| `form.defaults(fields)` | 读取表单默认值 |
+
 支持的链式方法包括：
 
 | 方法 | 说明 |
 |------|------|
-| `setTitle(text)` | 字段标题 |
-| `setDescription(text)` | 字段说明 |
-| `setDefault(value)` | 默认值 |
-| `setEnum(values)` | 可选值 |
-| `setEnumNames(labels)` | 可选值展示名 |
-| `setFormat(value)` | 字段格式，例如 `password`、`textarea` |
-| `setWidget(value)` | UI 组件提示，例如 `password`、`textarea` |
+| `title(text)` | 字段标题 |
+| `description(text)` | 字段说明 |
+| `default(value)` | 默认值 |
+| `options(values)` | 可选值 |
+| `format(value)` | 字段格式，例如 `password`、`textarea` |
+| `widget(value)` | UI 组件提示，例如 `radio`、`password`、`textarea` |
 | `setMin(value)` / `setMax(value)` | 数字范围 |
 | `setMinLength(value)` / `setMaxLength(value)` | 字符串长度 |
 | `setPattern(value)` | 字符串正则约束 |
 
-`SillyGirlPluginConfig` 实例属性和方法：
+`new form(fields)` 返回的配置实例属性和方法：
 
 ```js
 ConfigDB.jsonSchema   // 当前插件配置 schema
@@ -593,24 +660,22 @@ ConfigDB.set()        // 保存 ConfigDB.userConfig
 ConfigDB.set(obj)     // 保存指定配置对象
 ```
 
-注意：配置 schema 会在插件执行到 `new SillyGirlPluginConfig(schema)` 或 `form(schema)` 时注册。新插件首次安装后，
+注意：配置 schema 会在插件顶层执行到 `new form({...})` 时注册。新插件首次安装后，
 如果后台「插件配置」里还看不到它，先触发一次插件规则或把插件声明为 `@on_start true`。
 
-Python 插件也支持同一套配置 schema，构造函数不用 `new`，异步读取配置：
+Python 插件不用 `new`，也可以直接使用 `form.string()` 这一套 helper：
 
 ```python
-from sillygirl import sillyGirlCreateSchema, SillyGirlPluginConfig
+from sillygirl import form
 
-schema = sillyGirlCreateSchema.object({
-    "host": sillyGirlCreateSchema.string()
-        .setTitle("服务地址")
-        .setDefault("http://127.0.0.1:9090"),
-    "enabled": sillyGirlCreateSchema.boolean()
-        .setTitle("启用")
-        .setDefault(False),
+config = form({
+    "host": form.string()
+        .title("服务地址")
+        .default("http://127.0.0.1:9090"),
+    "enabled": form.boolean()
+        .title("启用")
+        .default(False),
 })
-
-config = SillyGirlPluginConfig(schema)
 
 
 async def main():
@@ -618,12 +683,27 @@ async def main():
     print(values)
 ```
 
-### QingLong 内联客户端
+### container 容器入口
 
-`QingLong` 是青龙面板的脚本内联客户端。先在 Admin 面板左侧「青龙容器」中添加青龙面板，再在脚本里按页面表格编号创建实例。
+`container` 是容器面板统一入口：
 
 ```js
-const ql = new QingLong({ id: 1 });
+const { container } = require("sillygirl");
+
+const all = await container.getList();       // { smallcat, qinglong, daidai }
+const qlList = await container.getList("qinglong");
+const ql1 = new container.QingLong({ id: 1 });
+const envs = await ql1.getEnvs();
+```
+
+`container.getList()` 返回后台已绑定的 smallcat / 青龙 / 呆呆容器数量和只读列表；`container.QingLong`、`container.SmallCat`、`container.DaiDai` 负责继续调用对应面板 API。
+
+### QingLong 内联客户端
+
+`container` 顶层导出负责容器列表和面板客户端。`container.QingLong` 是青龙面板的脚本内联客户端。先在 Admin 面板左侧「青龙容器」中添加青龙面板，再在脚本里按页面表格编号创建实例。
+
+```js
+const ql = new container.QingLong({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -667,7 +747,7 @@ ql.request(method, path, body, query);
 示例：
 
 ```js
-const ql = new QingLong({ id: 1 });
+const ql = new container.QingLong({ id: 1 });
 
 const envs = ql.getEnvs({ searchValue: "JD_COOKIE" });
 console.log("匹配数量", envs.length);
@@ -685,16 +765,16 @@ ql.deleteEnvs([created[0].id]);
 
 注意：
 
-- `new QingLong({ id: 1 })` 只接受对象参数，不支持 `new QingLong(1)`。
+- `new container.QingLong({ id: 1 })` 只接受对象参数，不支持 `new container.QingLong(1)`。
 - 编号按「青龙容器」页面当前列表顺序，从 `1` 开始。
 - 除 `request` 外，封装方法会在青龙业务 `code != 200` 或 HTTP 非 2xx 时抛出脚本异常。
 
 ### SmallCat 内联客户端
 
-`SmallCat` 是 smallcat 面板的脚本内联客户端。先在 Admin 面板左侧「smallcat」中添加地址和 `api_auth`，再在脚本里按页面表格编号创建实例。
+`container` 顶层导出负责容器列表和面板客户端。`container.SmallCat` 是 smallcat 面板的脚本内联客户端。先在 Admin 面板左侧「smallcat」中添加地址和 `api_auth`，再在脚本里按页面表格编号创建实例。
 
 ```js
-const sc = new SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -761,7 +841,7 @@ smallcat 运行时不会改写 API 返回。脚本收到的就是 smallcat 原�
 示例：
 
 ```js
-const sc = new SmallCat({ id: 1 });
+const sc = new container.SmallCat({ id: 1 });
 
 const qr = sc.createQr(1);
 if (!qr.status) {
@@ -833,16 +913,16 @@ console.log(qrOAuth.status, qrOAuth.message, qrOAuth.data);
 
 注意：
 
-- `new SmallCat({ id: 1 })` 只接受对象参数，不支持 `new SmallCat(1)`。
+- `new container.SmallCat({ id: 1 })` 只接受对象参数，不支持 `new container.SmallCat(1)`。
 - `addUser` 只接受对象参数，推荐写 `sc.addUser({ code: "xxxxx", displayName: "备注" })`；重扫已有账号使用 `rescanUser`。
 - 只有网络失败、请求体编码失败、JSON 解析失败这类没有 smallcat 原始响应的情况，运行时才会返回 `{ status: false, message: "..." }`。
 
 ### DaiDai 内联客户端
 
-`DaiDai` 是呆呆面板的脚本内联客户端。先在 Admin 面板左侧「呆呆面板」中添加地址、`app_key`、`app_secret`，再在脚本里按页面表格编号创建实例。
+`container` 顶层导出负责容器列表和面板客户端。`container.DaiDai` 是呆呆面板的脚本内联客户端。先在 Admin 面板左侧「呆呆面板」中添加地址、`app_key`、`app_secret`，再在脚本里按页面表格编号创建实例。
 
 ```js
-const dd = new DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 ```
 
 构造参数必须是对象：
@@ -896,7 +976,7 @@ dd.request(method, path, body, query);
 示例：
 
 ```js
-const dd = new DaiDai({ id: 1 });
+const dd = new container.DaiDai({ id: 1 });
 
 const envs = dd.getEnvs({ keyword: "JD_COOKIE" });
 console.log("匹配数量", envs.length);
@@ -914,7 +994,7 @@ dd.deleteEnv(created.id);
 
 注意：
 
-- `new DaiDai({ id: 1 })` 只接受对象参数，不支持 `new DaiDai(1)`。
+- `new container.DaiDai({ id: 1 })` 只接受对象参数，不支持 `new container.DaiDai(1)`。
 - 编号按「呆呆面板」页面当前列表顺序，从 `1` 开始。
 - 除 `request` 外，封装方法默认返回呆呆响应里的 `data`；HTTP 非 2xx 或 `success: false` 会抛出脚本异常。
 
@@ -1153,7 +1233,7 @@ Cron 表达式格式（5字段或6字段）：
  * @title 记忆名字
  * @rule raw ^我是谁$
  * @rule 我是[姓名]
- * @version v1.0.0
+ * @version v1.0.1
  * @author cdle
  */
 
@@ -1179,7 +1259,7 @@ if (!name) {
 /**
  * @title 倒计时
  * @rule 倒计时 [分钟:1,2,3,5,10] 分钟
- * @version v1.0.0
+ * @version v1.0.1
  */
 
 const minutes = parseInt(s.param(1));
@@ -1243,3 +1323,6 @@ RegistFuncs["utils"] = {
   isWeekend: (t) => t.Weekday() === 0 || t.Weekday() === 6,
 };
 ```
+
+
+迁移旧插件时不要依赖外部兼容脚本；插件应单文件运行，只从 `sillygirl` 导入 `sender`、`Sender`、`Bucket`、`container`、`utils`、`form` 等现有能力。

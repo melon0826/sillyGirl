@@ -30,7 +30,7 @@ func init() {
 		uuid := ctx.Query("uuid")
 		record := getPluginConfigRecord(uuid)
 		if record == nil {
-			ApiFail(ctx, "配置不存在，请先运行一次插件或声明 SillyGirlPluginConfig")
+			ApiFail(ctx, "配置不存在，请先运行一次插件或在脚本顶层声明 new form({...})")
 			return
 		}
 		ApiOK(ctx, record)
@@ -51,6 +51,34 @@ func init() {
 		SetBucketKeyValue(pluginConfigValues, req.UUID, req.Value)
 		ApiOK(ctx, nil)
 	})
+	GinApi(DELETE, "/api/admin/plugin/config", RequireAuth, func(ctx *gin.Context) {
+		var req struct {
+			UUID         string `json:"uuid"`
+			DeleteSchema bool   `json:"delete_schema"`
+		}
+		if err := ctx.BindJSON(&req); err != nil {
+			ApiFail(ctx, err.Error())
+			return
+		}
+		req.UUID = strings.TrimSpace(req.UUID)
+		if req.UUID == "" {
+			ApiFail(ctx, "缺少插件 UUID")
+			return
+		}
+		deletePluginConfig(req.UUID, req.DeleteSchema)
+		ApiOK(ctx, gin.H{"uuid": req.UUID, "delete_schema": req.DeleteSchema})
+	})
+}
+
+func deletePluginConfig(uuid string, deleteSchema bool) {
+	uuid = strings.TrimSpace(uuid)
+	if uuid == "" {
+		return
+	}
+	_, _, _ = SetBucketKeyValue2(pluginConfigValues, uuid, nil)
+	if deleteSchema {
+		_, _, _ = SetBucketKeyValue2(pluginConfigSchemas, uuid, nil)
+	}
 }
 
 func getPluginConfigRecords() []*PluginConfigRecord {

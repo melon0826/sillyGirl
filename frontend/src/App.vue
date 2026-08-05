@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
@@ -10,6 +10,7 @@ import Alert from 'ant-design-vue/es/alert';
 import AntApp from 'ant-design-vue/es/app';
 import Button from 'ant-design-vue/es/button';
 import Card from 'ant-design-vue/es/card';
+import Checkbox from 'ant-design-vue/es/checkbox';
 import Col from 'ant-design-vue/es/col';
 import ConfigProvider from 'ant-design-vue/es/config-provider';
 import Drawer from 'ant-design-vue/es/drawer';
@@ -24,6 +25,7 @@ import Modal from 'ant-design-vue/es/modal';
 import Pagination from 'ant-design-vue/es/pagination';
 import Popconfirm from 'ant-design-vue/es/popconfirm';
 import Progress from 'ant-design-vue/es/progress';
+import Radio from 'ant-design-vue/es/radio';
 import Row from 'ant-design-vue/es/row';
 import Segmented from 'ant-design-vue/es/segmented';
 import Select from 'ant-design-vue/es/select';
@@ -39,6 +41,7 @@ import zhCN from 'ant-design-vue/es/locale/zh_CN';
 import QRCode from 'qrcode';
 import {
   Antenna,
+  ArrowUp,
   Bot,
   CircleCheck,
   CircleX,
@@ -46,13 +49,11 @@ import {
   CloudDownload,
   Database,
   Download,
-  DoorOpen,
   Edit3,
-  FileCode2,
-  FolderOpen,
   Home,
   LogOut,
   MessageSquare,
+  Moon,
   Package,
   Pause,
   Play,
@@ -66,13 +67,14 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Sun,
   Trash2,
   User,
   X,
   Menu as MenuIcon,
   Wand2,
 } from 'lucide-vue-next';
-import { ApiError, clearAuthToken, del, get, post, put, readStorage, saveStorage, setAuthToken } from './api';
+import { ApiError, clearAuthToken, del, get, getAuthToken, post, put, readStorage, saveStorage, setAuthToken } from './api';
 import type { AdminUserRow, CarryGroup, CurrentUser, DaidaiPanel, Master, PluginInfo, QinglongPanel, Reply, SmallcatPanel, Task } from './types';
 import { timestamp } from './utils';
 
@@ -103,7 +105,6 @@ function apiData<T>(res: ApiEnvelope<T> | T): T {
 type PageKey =
   | 'welcome'
   | 'bots'
-  | 'scripts'
   | 'dependencies'
   | 'plugins'
   | 'storage'
@@ -120,7 +121,6 @@ type MessageToolKind = 'carry' | 'reply' | 'messages';
 const validPages: PageKey[] = [
   'welcome',
   'bots',
-  'scripts',
   'dependencies',
   'plugins',
   'storage',
@@ -134,22 +134,11 @@ const validPages: PageKey[] = [
 const legacyContainerPages: ContainerKind[] = ['qinglong', 'daidai', 'smallcat', 'yyb'];
 const legacyMessageToolPages: MessageToolKind[] = ['carry', 'reply', 'messages'];
 
-const starter = `/**
- * @title 新脚本
- * @rule raw ^ping$
- * @version v1.0.0
- * @author 自定义
- */
-
-s.reply("pong");
-`;
-
 const user = ref<CurrentUser | null>(null);
 const booting = ref(true);
 const page = ref<PageKey>(pageFromPath());
 const containerKind = ref<ContainerKind>(containerKindFromPath());
 const messageToolKind = ref<MessageToolKind>(messageToolKindFromPath());
-const selectedScriptId = ref(scriptIdFromPath());
 const mobileMenuOpen = ref(false);
 const loginModel = reactive({ username: '', password: '' });
 const setupRequired = ref(false);
@@ -288,7 +277,12 @@ type AuthResponse = {
 
 const scripts = computed(() => user.value?.plugins || []);
 const realScripts = computed(() => scripts.value.filter((item) => item.path?.startsWith('/script/') && !item.name?.startsWith('+')));
-const scriptKeyword = ref('');
+function dependencyPluginFileName(item?: { name?: string; type?: string; file?: string }) {
+  if (!item) return '-';
+  if (item.file) return item.file.split(/[\/]/).pop() || item.file;
+  const suffix = item.type === 'python' ? '.py' : '.js';
+  return `${item.name || 'plugin'}${suffix}`;
+}
 const overviewAdapters = computed(() => {
   const defaults = [
     { platform: 'clawbot', label: '微信 ClawBot' },
@@ -489,7 +483,6 @@ async function waitForRestartReady() {
 const menuItems = [
   { key: 'welcome', label: '概览', icon: () => h(Home, { size: 16 }) },
   { key: 'bots', label: 'BOT', icon: () => h(Bot, { size: 16 }) },
-  { key: 'scripts', label: '脚本插件', icon: () => h(FileCode2, { size: 16 }) },
   { key: 'dependencies', label: '依赖管理', icon: () => h(Package, { size: 16 }) },
   { key: 'plugins', label: '插件市场', icon: () => h(Plug, { size: 16 }) },
   { key: 'storage', label: '存储', icon: () => h(Database, { size: 16 }) },
@@ -503,7 +496,10 @@ const menuItems = [
 
 function pageFromPath(): PageKey {
   const path = window.location.pathname.replace(/^\/admin\/?/, '/');
-  if (path.startsWith('/script/')) return 'scripts';
+  if (path.startsWith('/script/') || path === '/scripts') {
+    window.history.replaceState({}, '', '/admin/plugins');
+    return 'plugins';
+  }
   const key = path.split('/').filter(Boolean)[0] || 'welcome';
   if (legacyContainerPages.includes(key as ContainerKind)) return 'containers';
   if (legacyMessageToolPages.includes(key as MessageToolKind)) return 'message-tools';
@@ -528,10 +524,6 @@ function messageToolKindFromPath(): MessageToolKind {
   return legacyMessageToolPages.includes(key as MessageToolKind) ? (key as MessageToolKind) : 'carry';
 }
 
-function scriptIdFromPath() {
-  return window.location.pathname.match(/\/script\/([^/]+)/)?.[1];
-}
-
 function maskSecret(value?: string) {
   const text = `${value || ''}`.trim();
   if (!text) return '-';
@@ -543,7 +535,6 @@ function navigate(next: PageKey, path?: string) {
   const url = path || (next === 'welcome' ? '/admin/' : next === 'containers' ? `/admin/containers/${containerKind.value}` : next === 'message-tools' ? `/admin/message-tools/${messageToolKind.value}` : `/admin/${next}`);
   window.history.pushState({}, '', url);
   page.value = next;
-  selectedScriptId.value = scriptIdFromPath();
   mobileMenuOpen.value = false;
 }
 
@@ -666,264 +657,16 @@ onMounted(() => {
     page.value = pageFromPath();
     containerKind.value = containerKindFromPath();
     messageToolKind.value = messageToolKindFromPath();
-    selectedScriptId.value = scriptIdFromPath();
-  });
+    });
   window.addEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
 });
 
 onBeforeUnmount(() => {
   stopWebChat();
-  window.removeEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
-});
-
-const scriptState = reactive({ content: '', loading: false });
-const scriptCreateState = reactive({ open: false, fileName: '新脚本', suffix: '.js', saving: false });
-const scriptEditorHost = ref<HTMLElement | null>(null);
-const scriptEditorEditable = new Compartment();
-const scriptEditorLanguage = new Compartment();
-let scriptEditorView: EditorView | null = null;
-let syncingScriptFromEditor = false;
-function scriptFileId(item?: { path?: string }) {
-  return item?.path?.split('/').pop() || '';
-}
-
-function isNewScriptEntry(item?: { name?: string }) {
-  return !!item?.name?.startsWith('+');
-}
-
-function scriptDisplayName(item?: { name?: string; path?: string }) {
-  if (!item) return '未选择脚本';
-  const name = item.name || scriptFileId(item);
-  return isNewScriptEntry(item) ? '新增脚本' : name;
-}
-
-function scriptFileName(item?: { name?: string; path?: string; type?: string; file?: string }) {
-  if (!item) return '-';
-  if (isNewScriptEntry(item)) return 'new-script.js';
-  if ('file' in item && item.file) return item.file.split(/[\\/]/).pop() || 'main.js';
-  const title = scriptDisplayName(item)
-    .replace(/[🔧💫🔒👑]/gu, '')
-    .trim();
-  const suffix = item.type === 'python' ? '.py' : '.js';
-  return `${title || scriptFileId(item)}${suffix}`;
-}
-
-function isFileScript(item = currentScriptFile.value) {
-  return item?.type === 'node' || item?.type === 'python';
-}
-
-function isPythonScript(item = currentScriptFile.value) {
-  return item?.type === 'python' || /\.py$/i.test(scriptFileName(item));
-}
-
-function scriptRuntimeLabel(item = currentScriptFile.value) {
-  if (item?.type === 'python' || isPythonScript(item)) return 'Python 3.12';
-  if (item?.type === 'node') return 'NodeJS';
-  return '旧脚本';
-}
-
-function scriptLanguageExtension() {
-  return isPythonScript() ? python() : javascript();
-}
-
-const scriptFileRows = computed(() => {
-  const keyword = scriptKeyword.value.trim().toLowerCase();
-  const rows = scripts.value.filter((item) => item.path?.startsWith('/script/'));
-  if (!keyword) return rows;
-  return rows.filter((item) => `${item.name || ''} ${scriptFileName(item)} ${scriptFileId(item)}`.toLowerCase().includes(keyword));
-});
-const currentScriptId = computed(() => selectedScriptId.value || realScripts.value[0]?.path?.split('/').pop() || scripts.value.find((item) => item.path?.startsWith('/script/'))?.path?.split('/').pop());
-const currentScriptFile = computed(() => scripts.value.find((item) => scriptFileId(item) === currentScriptId.value));
-
-const canEditScript = computed(() => !scriptState.loading && !!currentScriptId.value);
-
-function scriptEditableExtension() {
-  return [EditorView.editable.of(canEditScript.value), EditorState.readOnly.of(!canEditScript.value)];
-}
-
-function syncScriptEditorEditable() {
-  if (!scriptEditorView) return;
-  scriptEditorView.dispatch({
-    effects: scriptEditorEditable.reconfigure(scriptEditableExtension()),
-  });
-}
-
-function syncScriptEditorLanguage() {
-  if (!scriptEditorView) return;
-  scriptEditorView.dispatch({
-    effects: scriptEditorLanguage.reconfigure(scriptLanguageExtension()),
-  });
-}
-
-function destroyScriptEditor() {
-  scriptEditorView?.destroy();
-  scriptEditorView = null;
-}
-
-function createScriptEditor() {
-  if (scriptEditorView || !scriptEditorHost.value) return;
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (!update.docChanged) return;
-    syncingScriptFromEditor = true;
-    scriptState.content = update.state.doc.toString();
-    syncingScriptFromEditor = false;
-  });
-  scriptEditorView = new EditorView({
-    parent: scriptEditorHost.value,
-    state: EditorState.create({
-      doc: scriptState.content,
-      extensions: [
-        basicSetup,
-        scriptEditorLanguage.of(scriptLanguageExtension()),
-        oneDark,
-        EditorView.lineWrapping,
-        scriptEditorEditable.of(scriptEditableExtension()),
-        updateListener,
-      ],
-    }),
-  });
-}
-
-async function ensureScriptEditor() {
-  await nextTick();
-  if (page.value === 'scripts') {
-    createScriptEditor();
-    syncScriptEditorEditable();
-    syncScriptEditorLanguage();
-  } else {
-    destroyScriptEditor();
-  }
-}
-
-async function loadScript(id = currentScriptId.value) {
-  if (!id) return;
-  scriptState.loading = true;
-  try {
-    if (isFileScript()) {
-      const res = await get<ApiEnvelope<{ content: string }>>(`/api/admin/node/script?id=${encodeURIComponent(id)}`);
-      scriptState.content = apiData(res)?.content || '';
-    } else {
-      const res = await readStorage<Record<string, string>>(`plugins.${id}`);
-      scriptState.content = apiData(res)[`plugins.${id}`] || starter;
-    }
-  } finally {
-    scriptState.loading = false;
-  }
-}
-
-async function saveScript(value = scriptState.content) {
-  if (!currentScriptId.value) return;
-  if (isFileScript()) {
-    await put('/api/admin/node/script', { id: currentScriptId.value, content: value });
-  } else {
-    await saveStorage({ [`plugins.${currentScriptId.value}`]: value }, currentScriptId.value);
-  }
-  message.success('脚本已保存');
-  await loadUser();
-}
-
-async function formatScript() {
-  if (!scriptState.content.trim()) return;
-  if (isPythonScript()) {
-    message.warning('Python 格式化暂未内置，请保存前自行格式化。');
-    return;
-  }
-  try {
-    const [{ default: prettier }, { default: parserBabel }, { default: parserEstree }] = await Promise.all([
-      import('prettier/standalone'),
-      import('prettier/plugins/babel'),
-      import('prettier/plugins/estree'),
-    ]);
-    const formatted = await prettier.format(scriptState.content, {
-      parser: 'babel',
-      plugins: [parserBabel, parserEstree],
-      singleQuote: true,
-      semi: true,
-      trailingComma: 'es5',
-      printWidth: 100,
-    });
-    scriptState.content = formatted.trimEnd() + '\n';
-    message.success('格式化完成');
-  } catch (error) {
-    message.error(`格式化失败：${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function removeScript() {
-  if (!currentScriptId.value) return;
-  if (isFileScript()) {
-    await del('/api/admin/node/script', { id: currentScriptId.value });
-  } else {
-    await saveStorage({ [`plugins.${currentScriptId.value}`]: 'uninstall' });
-  }
-  message.success('脚本已卸载');
-  await loadUser();
-  navigate('scripts');
-}
-
-function openCreateScriptModal() {
-  scriptCreateState.fileName = '新脚本';
-  scriptCreateState.suffix = '.js';
-  scriptCreateState.open = true;
-}
-
-function normalizeCreateScriptFileName() {
-  const fileName = scriptCreateState.fileName.trim().replace(/\.(js|py)$/i, '');
-  if (!fileName) return '';
-  if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) return fileName;
-  return `${fileName}${scriptCreateState.suffix}`;
-}
-
-async function createScript() {
-  const fileName = normalizeCreateScriptFileName();
-  if (!fileName) {
-    message.error('请输入脚本文件名');
-    return;
-  }
-  if (/[\\/:<>"|?*]/.test(fileName) || fileName.includes('..')) {
-    message.error('脚本文件名不合法');
-    return;
-  }
-  scriptCreateState.saving = true;
-  try {
-    const res = await post<ApiEnvelope<{ id: string }>>('/api/admin/node/script', { name: fileName });
-    const data = apiData(res);
-    scriptCreateState.open = false;
-    await loadUser();
-    if (data.id) navigate('scripts', `/admin/script/${data.id}`);
-  } finally {
-    scriptCreateState.saving = false;
-  }
-}
-
-function selectScriptFile(item: { path?: string; name?: string; type?: string; file?: string }) {
-  const id = scriptFileId(item);
-  if (!id) return;
-  navigate('scripts', `/admin/script/${id}`);
-  syncScriptEditorLanguage();
-}
-
-watch(currentScriptId, (id) => loadScript(id), { immediate: true });
-watch([page, () => booting.value, () => user.value], () => ensureScriptEditor(), { immediate: true });
-watch([currentScriptId, () => scriptState.loading], () => syncScriptEditorEditable());
-watch(currentScriptFile, () => syncScriptEditorLanguage());
-watch(
-  () => scriptState.content,
-  (content) => {
-    if (!scriptEditorView || syncingScriptFromEditor) return;
-    const current = scriptEditorView.state.doc.toString();
-    if (current === content) return;
-    scriptEditorView.dispatch({
-      changes: { from: 0, to: scriptEditorView.state.doc.length, insert: content },
-    });
-  }
-);
-
-onBeforeUnmount(() => {
-  destroyScriptEditor();
   clearClawbotLoginPoll();
   window.clearInterval(systemUpdate.timer);
   window.clearInterval(systemUpdate.restartTimer);
+  window.removeEventListener('sillygirl:admin-auth-expired', handleAdminAuthExpired);
 });
 
 const storageState = reactive({
@@ -1574,27 +1317,32 @@ const yyb = reactive({
   rows: [] as YybPanel[],
   total: 0,
   loading: false,
-  editing: null as YybPanel | null,
-  form: {} as YybPanel,
   testing: false,
   saving: false,
+  editing: null as YybPanel | null,
+  form: {} as YybPanel,
 });
+
 async function loadYybPanels() {
   yyb.loading = true;
   try {
     const res = await get<ApiEnvelope<{ list: YybPanel[]; total: number }>>('/api/admin/yyb/panels');
-    const data = apiData(res);
+    const data = res?.data ?? res;
     yyb.rows = data?.list || [];
     yyb.total = data?.total || 0;
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'yyb-go 列表加载失败');
   } finally {
     yyb.loading = false;
   }
 }
+
 function openYybPanel(row?: YybPanel) {
-  const data = row || { name: '', address: '' };
+  const data = row || { address: 'http://127.0.0.1:8181' } as YybPanel;
   yyb.editing = data;
   yyb.form = { ...data };
 }
+
 async function testYybPanel(panel = yyb.form) {
   yyb.testing = true;
   try {
@@ -1606,6 +1354,7 @@ async function testYybPanel(panel = yyb.form) {
     yyb.testing = false;
   }
 }
+
 async function saveYybPanel() {
   yyb.saving = true;
   try {
@@ -1619,6 +1368,7 @@ async function saveYybPanel() {
     yyb.saving = false;
   }
 }
+
 async function removeYybPanel(row: YybPanel) {
   await del('/api/admin/yyb/panel', row);
   message.success('已删除');
@@ -1684,11 +1434,55 @@ const plugins = reactive({
   sourceRemoving: {} as Record<string, boolean>,
   installing: {} as Record<string, boolean>,
   uninstalling: {} as Record<string, boolean>,
-  opening: {} as Record<string, boolean>,
+  uninstallModal: {
+    open: false,
+    row: null as PluginInfo | null,
+    deleteConfig: false,
+  },
   requestId: 0,
   detailOpen: false,
   detail: null as PluginInfo | null,
 });
+
+const pluginEditor = reactive({
+  open: false,
+  loading: false,
+  saving: false,
+  deleting: false,
+  isNew: false,
+  id: '',
+  name: '',
+  title: '',
+  type: 'node' as DependencyRuntime,
+  theme: 'dark' as 'dark' | 'light',
+  installed: false,
+  content: '',
+  row: null as PluginInfo | null,
+});
+const pluginEditorHost = ref<HTMLElement | null>(null);
+const pluginEditorEditable = new Compartment();
+const pluginEditorLanguage = new Compartment();
+const pluginEditorTheme = new Compartment();
+let pluginEditorView: EditorView | null = null;
+
+const pluginEditorStarter = `// [title: 本地插件]
+// [name: localPlugin]
+// [description: 本地手动新增插件]
+// [author: admin]
+// [version: v1.0.0]
+// [rule: ^测试插件$]
+// [public: false]
+// [class: 工具]
+// [depe: []]
+
+const { sender: s } = require('sillygirl');
+
+async function main() {
+  await s.reply('pong');
+}
+
+main().catch((error) => s.reply(error.message || String(error)));
+`;
 const pluginClassOptions = computed(() => {
   const classes = (plugins.meta.class || {}) as Record<string, number>;
   const names = Object.keys(classes).filter(Boolean);
@@ -1719,6 +1513,41 @@ function pluginClassTags(row: PluginInfo) {
 function pluginDependencies(row: PluginInfo) {
   return [...new Set((row.dependencies || []).map((item) => String(item).trim()).filter(Boolean))];
 }
+function declaredPluginDependenciesFromContent(content: string) {
+  const dependencies = new Set<string>();
+  const addRaw = (rawValue: string) => {
+    const raw = String(rawValue || '').trim();
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item) => {
+          const value = String(item || '').trim();
+          if (value) dependencies.add(value);
+        });
+        return;
+      }
+      if (parsed && typeof parsed === 'object') {
+        Object.keys(parsed).forEach((key) => {
+          const value = String(key || '').trim();
+          if (value) dependencies.add(value);
+        });
+        return;
+      }
+    } catch {
+      // 兼容 [depe: axios, ipp] 手写格式；规范格式仍然是 JSON array。
+    }
+    raw.split(/[,，\s]+/).forEach((item) => {
+      const value = item.trim().replace(/^['"]|['"]$/g, '');
+      if (value && value !== '[' && value !== ']') dependencies.add(value);
+    });
+  };
+  const legacyPattern = /^[ \t]*(?:\/\/|#+)[ \t]*\[[ \t]*depe[ \t]*:[ \t]*(.*?)[ \t]*\][ \t]*$/gim;
+  let match: RegExpExecArray | null;
+  while ((match = legacyPattern.exec(content || ''))) addRaw(match[1]);
+  return [...dependencies];
+}
+
 function pluginTriggerText(row: PluginInfo) {
   const rule = String(row.rule || '').trim();
   if (!rule) return '';
@@ -1842,7 +1671,23 @@ async function installPlugin(row: PluginInfo) {
     plugins.installing[row.id] = false;
   }
 }
-async function uninstallPlugin(row: PluginInfo) {
+function openUninstallPluginModal(row: PluginInfo) {
+  plugins.uninstallModal.row = row;
+  plugins.uninstallModal.deleteConfig = false;
+  plugins.uninstallModal.open = true;
+}
+function cancelUninstallPluginModal() {
+  if (plugins.uninstallModal.row && plugins.uninstalling[plugins.uninstallModal.row.id]) return;
+  plugins.uninstallModal.open = false;
+  plugins.uninstallModal.row = null;
+  plugins.uninstallModal.deleteConfig = false;
+}
+async function confirmUninstallPlugin() {
+  const row = plugins.uninstallModal.row;
+  if (!row) return;
+  await uninstallPlugin(row, plugins.uninstallModal.deleteConfig);
+}
+async function uninstallPlugin(row: PluginInfo, deleteConfig = false) {
   plugins.uninstalling[row.id] = true;
   try {
     const res = await put<ApiEnvelope<{ errors?: Record<string, string>; messages?: Record<string, string> }>>('/api/admin/storage', {
@@ -1857,36 +1702,21 @@ async function uninstallPlugin(row: PluginInfo) {
     if (pluginConfigs.selected?.uuid === row.id) {
       pluginConfigs.modalOpen = false;
       pluginConfigs.selected = null;
+      pluginConfigs.marketRow = null;
+      pluginConfigs.configurable = false;
     }
-    message.success(firstMessage || '插件已卸载');
+    if (deleteConfig) {
+      await del('/api/admin/plugin/config', { uuid: row.id, delete_schema: true });
+    }
+    plugins.uninstallModal.open = false;
+    plugins.uninstallModal.row = null;
+    plugins.uninstallModal.deleteConfig = false;
+    message.success(deleteConfig ? '插件已卸载，配置已同步删除' : (firstMessage || '插件已卸载'));
     await Promise.all([loadPlugins(), loadUser(), loadPluginConfigs()]);
   } catch (error) {
     message.error(error instanceof Error ? error.message : '插件卸载失败');
   } finally {
     plugins.uninstalling[row.id] = false;
-  }
-}
-async function togglePluginOpen(row: PluginInfo) {
-  if (!pluginInstalled(row)) {
-    message.warning('请先安装插件');
-    return;
-  }
-  plugins.opening[row.id] = true;
-  try {
-    const res = await put<ApiEnvelope<{ uuid: string; open: boolean }>>('/api/admin/plugin/open', {
-      uuid: row.id,
-      open: !row.open,
-    });
-    const data = apiData(res);
-    row.open = data.open;
-    if (plugins.detail?.id === row.id) {
-      plugins.detail.open = data.open;
-    }
-    message.success(data.open ? '插件已开放到 Home 页面' : '已取消 Home 页面开放');
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : '修改开放状态失败');
-  } finally {
-    plugins.opening[row.id] = false;
   }
 }
 function pluginStatusLabel(row: PluginInfo) {
@@ -1903,12 +1733,254 @@ function pluginInstalled(row: PluginInfo) {
   return row.status === 1 || row.status === 2 || row.status === 6;
 }
 
+function pluginUpgradable(row: PluginInfo) {
+  return row.status === 1;
+}
+
 function pluginCanOpen(row: PluginInfo) {
   return pluginInstalled(row) && row.uses_smallcat === true;
 }
 
 function pluginCanConfigure(row: PluginInfo) {
   return pluginInstalled(row) && row.config_registered === true;
+}
+
+function pluginCanManage(row: PluginInfo) {
+  return pluginCanConfigure(row) || pluginCanOpen(row);
+}
+
+
+function pluginEditorLanguageExtension() {
+  return pluginEditor.type === 'python' || /from sillygirl import|import sillygirl/.test(pluginEditor.content) ? python() : javascript();
+}
+function syncPluginEditorContent(value = pluginEditor.content) {
+  if (!pluginEditorView) return;
+  const current = pluginEditorView.state.doc.toString();
+  if (current === value) return;
+  pluginEditorView.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+}
+function syncPluginEditorLanguage() {
+  pluginEditorView?.dispatch({ effects: pluginEditorLanguage.reconfigure(pluginEditorLanguageExtension()) });
+}
+function pluginEditorThemeExtension() {
+  return pluginEditor.theme === 'dark' ? oneDark : [];
+}
+function syncPluginEditorTheme() {
+  pluginEditorView?.dispatch({ effects: pluginEditorTheme.reconfigure(pluginEditorThemeExtension()) });
+}
+function togglePluginEditorTheme() {
+  pluginEditor.theme = pluginEditor.theme === 'dark' ? 'light' : 'dark';
+  syncPluginEditorTheme();
+}
+function destroyPluginEditor() {
+  pluginEditorView?.destroy();
+  pluginEditorView = null;
+}
+function initPluginEditor() {
+  if (pluginEditorView || !pluginEditorHost.value) return;
+  pluginEditorView = new EditorView({
+    parent: pluginEditorHost.value,
+    state: EditorState.create({
+      doc: pluginEditor.content,
+      extensions: [
+        basicSetup,
+        pluginEditorLanguage.of(pluginEditorLanguageExtension()),
+        pluginEditorTheme.of(pluginEditorThemeExtension()),
+        pluginEditorEditable.of(EditorView.editable.of(true)),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) pluginEditor.content = update.state.doc.toString();
+        }),
+      ],
+    }),
+  });
+}
+function openNewMarketPluginEditor() {
+  pluginEditor.isNew = true;
+  pluginEditor.id = '';
+  pluginEditor.name = 'localPlugin';
+  pluginEditor.title = '新增本地插件';
+  pluginEditor.type = 'node';
+  pluginEditor.installed = false;
+  pluginEditor.row = null;
+  pluginEditor.content = pluginEditorStarter;
+  pluginEditor.open = true;
+  pluginEditor.loading = false;
+  nextTick(() => {
+    destroyPluginEditor();
+    initPluginEditor();
+  });
+}
+async function openMarketPluginEditor(row: PluginInfo) {
+  pluginEditor.isNew = false;
+  pluginEditor.id = row.id;
+  pluginEditor.name = row.title || row.id;
+  pluginEditor.title = row.title || row.id;
+  pluginEditor.type = marketPluginDependencyRuntime(row);
+  pluginEditor.installed = pluginInstalled(row);
+  pluginEditor.row = row;
+  pluginEditor.content = '';
+  pluginEditor.open = true;
+  pluginEditor.loading = true;
+  await nextTick();
+  destroyPluginEditor();
+  initPluginEditor();
+  try {
+    const res = await get<ApiEnvelope<{ id: string; title?: string; name?: string; type?: string; installed?: boolean; content: string }>>(`/api/admin/plugins/local/script?id=${encodeURIComponent(row.id)}`);
+    const data = apiData(res);
+    pluginEditor.id = data.id || row.id;
+    pluginEditor.name = data.name || row.title || row.id;
+    pluginEditor.title = data.title || row.title || row.id;
+    pluginEditor.type = data.type === 'python' ? 'python' : 'node';
+    pluginEditor.installed = data.installed !== false;
+    pluginEditor.content = data.content || '';
+    syncPluginEditorLanguage();
+    syncPluginEditorContent(pluginEditor.content);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '读取插件源码失败');
+  } finally {
+    pluginEditor.loading = false;
+  }
+}
+function closeMarketPluginEditor() {
+  pluginEditor.open = false;
+  destroyPluginEditor();
+}
+function handlePluginEditorOpenChange(open: boolean) {
+  if (open) nextTick(initPluginEditor);
+  else destroyPluginEditor();
+}
+function pluginEditorMetaValue(content: string, key: string) {
+  const aliases = new Set((key === 'desc' ? ['desc', 'description'] : [key]).map((item) => item.toLowerCase()));
+  for (const line of String(content || '').split(/\r?\n/)) {
+    const legacy = /^[ \t]*(?:\/\/|#+)[ \t]*\[[ \t]*([\d\w+-]+)[ \t]*:[ \t]*(.*)[ \t]*\][^\r\n]*$/.exec(line);
+    if (legacy) {
+      const metaKey = String(legacy[1] || '').toLowerCase();
+      const metaValue = String(legacy[2] || '').trim();
+      if (aliases.has(metaKey) && metaValue) return metaValue;
+    }
+  }
+  return '';
+}
+
+function pluginEditorMetaEnabled(content: string, key: string) {
+  const value = pluginEditorMetaValue(content, key).toLowerCase();
+  return value === 'true' || value === '1' || value === 'yes' || value === 'on';
+}
+function normalizePluginEditorFileBase(value: string) {
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .split('/')
+    .pop()!
+    .replace(/\.(js|py)$/i, '');
+}
+function validatePluginEditorRequired() {
+  const content = pluginEditor.content || '';
+  const missing: string[] = [];
+  for (const item of ['title', 'name', 'desc', 'version']) {
+    if (!pluginEditorMetaValue(content, item)) {
+      missing.push(({ title: '[title: xxx]', name: '[name: 文件名]', desc: '[description: xxx]', version: '[version: vx.y.z]' } as Record<string, string>)[item]);
+    }
+  }
+  if (!pluginEditorMetaValue(content, 'rule') && !pluginEditorMetaValue(content, 'cron') && !pluginEditorMetaEnabled(content, 'on_start') && !pluginEditorMetaEnabled(content, 'web')) {
+    missing.push('[rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]');
+  }
+  if (missing.length) {
+    message.warning(`插件注释缺少必须字段：${missing.join('、')}`);
+    return false;
+  }
+  if (pluginEditor.isNew || !pluginEditor.installed) {
+    const inputName = normalizePluginEditorFileBase(pluginEditor.name);
+    const metaName = normalizePluginEditorFileBase(pluginEditorMetaValue(content, 'name'));
+    if (!inputName) {
+      message.warning('插件名称不能为空，且必须和 [name: 文件名] 一致');
+      return false;
+    }
+    if (inputName !== metaName) {
+      message.warning(`插件名称必须和 [name: ${metaName || '文件名'}] 一致，当前填写：${inputName}`);
+      return false;
+    }
+  }
+  return true;
+}
+
+async function formatMarketPluginEditor() {
+  if (!pluginEditor.content.trim()) return;
+  if (pluginEditor.type === 'python') {
+    message.info('Python 插件暂不做前端格式化，请保存前自行确认缩进');
+    return;
+  }
+  try {
+    const [{ default: prettier }, { default: parserBabel }, { default: parserEstree }] = await Promise.all([
+      import('prettier/standalone'),
+      import('prettier/plugins/babel'),
+      import('prettier/plugins/estree'),
+    ]);
+    const formatted = await prettier.format(pluginEditor.content, {
+      parser: 'babel',
+      plugins: [parserBabel, parserEstree],
+      singleQuote: true,
+      trailingComma: 'all',
+    });
+    pluginEditor.content = formatted.trimEnd() + '\n';
+    syncPluginEditorContent(pluginEditor.content);
+    message.success('格式化完成');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '格式化失败');
+  }
+}
+async function saveMarketPluginEditor() {
+  if (!validatePluginEditorRequired()) return;
+  pluginEditor.saving = true;
+  try {
+    const payload = { id: pluginEditor.id, name: pluginEditor.name || pluginEditor.title, type: pluginEditor.type, content: pluginEditor.content };
+    const res = pluginEditor.isNew
+      ? await post<ApiEnvelope<{ id: string }>>('/api/admin/plugins/local/script', payload)
+      : await put<ApiEnvelope<{ id: string }>>('/api/admin/plugins/local/script', payload);
+    const data = apiData(res);
+    pluginEditor.id = data?.id || pluginEditor.id;
+    pluginEditor.installed = true;
+    const savedRuntime: DependencyRuntime = data?.type === 'python' || pluginEditor.type === 'python' ? 'python' : 'node';
+    const savedDependencies = declaredPluginDependenciesFromContent(pluginEditor.content);
+    const savedRow: PluginInfo = {
+      id: pluginEditor.id,
+      title: data?.title || pluginEditor.name || pluginEditor.title || pluginEditor.id,
+      type: savedRuntime,
+      suffix: savedRuntime === 'python' ? '.py' : '.js',
+      status: 2,
+      address: data?.path ? `local://?path=${encodeURIComponent(data.path)}` : '',
+      dependencies: savedDependencies,
+    };
+    message.success(pluginEditor.isNew ? '本地插件已新增' : '插件已保存');
+    pluginEditor.open = false;
+    destroyPluginEditor();
+    plugins.tab = 'private';
+    await Promise.all([loadUser(), loadPlugins(1, plugins.pageSize, true)]);
+    try {
+      await offerPluginDependencyInstall(savedRow);
+    } catch (error) {
+      message.warning(`插件已保存，但依赖检测失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '保存插件失败');
+  } finally {
+    pluginEditor.saving = false;
+  }
+}
+async function deleteMarketPluginEditor() {
+  if (!pluginEditor.id || !pluginEditor.installed) return;
+  pluginEditor.deleting = true;
+  try {
+    await del('/api/admin/plugins/local/script', { id: pluginEditor.id });
+    message.success('插件已删除');
+    pluginEditor.open = false;
+    destroyPluginEditor();
+    await Promise.all([loadUser(), loadPlugins(1, plugins.pageSize, true)]);
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '删除插件失败');
+  } finally {
+    pluginEditor.deleting = false;
+  }
 }
 
 type NodeDependencyPlugin = {
@@ -2066,7 +2138,7 @@ const dependencyRegistryLabel = computed(() => nodeDeps.runtime === 'python' ? '
 const dependencyPackagePlaceholder = computed(() => nodeDeps.runtime === 'python' ? '依赖名，例如 requests 或 requests==2.32.0' : '依赖名，例如 axios 或 ipp@latest');
 const dependencyPluginOptions = computed(() => [
   { label: `全部 ${dependencyRuntimeLabel.value} 插件`, value: '' },
-  ...nodeDeps.plugins.map((item) => ({ label: `${item.title || item.name} / ${item.file || scriptFileName(item)}`, value: item.name })),
+  ...nodeDeps.plugins.map((item) => ({ label: `${item.title || item.name} / ${item.file || dependencyPluginFileName(item)}`, value: item.name })),
 ]);
 function showDependencyInstallResult(output: unknown) {
   const text = String(output || '').trim();
@@ -2151,8 +2223,11 @@ async function removeNodeDependency(row: NodeDependencyRow) {
 const pluginConfigs = reactive({
   rows: [] as any[],
   selected: null as any,
+  marketRow: null as PluginInfo | null,
   form: {} as Record<string, any>,
   text: {} as Record<string, string>,
+  configurable: false,
+  openToUsers: false,
   loading: false,
   saving: false,
   modalOpen: false,
@@ -2162,22 +2237,31 @@ const schemaFields = computed(() => {
   const props = pluginConfigs.selected?.schema?.properties || {};
   return Object.entries(props).map(([key, prop]) => ({ key, prop: prop as any }));
 });
+const pluginOpenAvailable = computed(() => Boolean(
+  pluginConfigs.marketRow && pluginCanOpen(pluginConfigs.marketRow),
+));
+const pluginSettingsCanSave = computed(() => Boolean(
+  pluginConfigs.selected && (pluginConfigs.configurable || pluginOpenAvailable.value),
+));
 async function loadPluginConfigs() {
   pluginConfigs.loading = true;
   try {
     const res = await get<ApiEnvelope<any[]>>('/api/admin/plugin/configs');
     pluginConfigs.rows = apiData(res) || [];
-    if (pluginConfigs.selected) {
+    if (pluginConfigs.selected && pluginConfigs.configurable) {
       const next = pluginConfigs.rows.find((item) => item.uuid === pluginConfigs.selected?.uuid);
-      if (next) openPluginConfig(next);
+      if (next) openPluginConfig(next, pluginConfigs.marketRow, true);
       else pluginConfigs.selected = null;
     }
   } finally {
     pluginConfigs.loading = false;
   }
 }
-function openPluginConfig(row: any) {
+function openPluginConfig(row: any, marketRow: PluginInfo | null = null, configurable = true) {
   pluginConfigs.selected = row;
+  pluginConfigs.marketRow = marketRow;
+  pluginConfigs.configurable = configurable;
+  pluginConfigs.openToUsers = Boolean(marketRow?.open);
   const values = { ...(row.user_config || {}) };
   for (const [key, prop] of Object.entries(row.schema?.properties || {}) as Array<[string, any]>) {
     if (values[key] === undefined && prop.default !== undefined) values[key] = prop.default;
@@ -2199,28 +2283,88 @@ function fieldType(prop: any) {
   if (Array.isArray(prop?.enum)) return 'enum';
   return prop?.type || 'string';
 }
+type PluginPanelKind = 'smallcat' | 'qinglong' | 'daidai';
+function pluginPanelKind(field: { key: string; prop?: any }): PluginPanelKind | null {
+  const widget = String(field.prop?.['ui:widget'] || '').toLowerCase();
+  if (widget === 'smallcat-panel') return 'smallcat';
+  if (widget === 'qinglong-panel') return 'qinglong';
+  if (widget === 'daidai-panel') return 'daidai';
+  const key = String(field.key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const title = String(field.prop?.title || '');
+  if (key === 'smallcatid' || /smallcat.*编号/i.test(title)) return 'smallcat';
+  if (key === 'qinglongid' || key === 'qlid' || /青龙.*编号/.test(title)) return 'qinglong';
+  if (key === 'daidaiid' || key === 'ddid' || /呆呆.*编号/.test(title)) return 'daidai';
+  return null;
+}
+function pluginPanelChoices(field: { key: string; prop?: any }) {
+  const kind = pluginPanelKind(field);
+  let available = 0;
+  if (kind === 'smallcat') available = Math.max(smallcat.total, smallcat.rows.length);
+  if (kind === 'qinglong') available = Math.max(qinglong.total, qinglong.rows.length);
+  if (kind === 'daidai') available = Math.max(daidai.total, daidai.rows.length);
+  return Array.from({ length: Math.max(available, 0) }, (_, index) => index + 1);
+}
+function pluginPanelEmptyText(field: { key: string; prop?: any }) {
+  const labels: Record<PluginPanelKind, string> = { smallcat: 'SmallCat', qinglong: '青龙', daidai: '呆呆' };
+  const kind = pluginPanelKind(field);
+  return kind ? `暂无已配置的${labels[kind]}容器，请先到容器管理中添加` : '';
+}
+function pluginConfigFieldVisible(field: { key: string; prop: any }) {
+  const properties = pluginConfigs.selected?.schema?.properties || {};
+  if (Object.prototype.hasOwnProperty.call(properties, 'sync_panel')) {
+    const syncPanel = String(pluginConfigs.form.sync_panel || '');
+    if (field.key === 'qinglong_id') return syncPanel === 'qinglong';
+    if (field.key === 'daidai_id') return syncPanel === 'daidai';
+  }
+  if (!Object.prototype.hasOwnProperty.call(properties, 'account_mode')) return true;
+  const title = String(field.prop?.title || '');
+  const description = String(field.prop?.description || '');
+  const isManualOnly = field.key === 'openid'
+    || field.key === 'manual_openids'
+    || field.key === 'accounts_json'
+    || /手动\s*openid/i.test(title)
+    || /仅手动填写模式生效/.test(description);
+  return !isManualOnly || pluginConfigs.form.account_mode === 'manual';
+}
 async function savePluginConfig() {
   if (!pluginConfigs.selected) return;
   const value = { ...pluginConfigs.form };
-  for (const field of schemaFields.value) {
-    const type = fieldType(field.prop);
-    if ((type === 'object' || type === 'array') && pluginConfigs.text[field.key] !== undefined) {
-      try {
-        value[field.key] = JSON.parse(pluginConfigs.text[field.key] || (type === 'array' ? '[]' : '{}'));
-      } catch {
-        message.error(`${field.prop.title || field.key} JSON 格式错误`);
-        return;
+  if (pluginConfigs.configurable) {
+    for (const field of schemaFields.value) {
+      const type = fieldType(field.prop);
+      if ((type === 'object' || type === 'array') && pluginConfigs.text[field.key] !== undefined) {
+        try {
+          value[field.key] = JSON.parse(pluginConfigs.text[field.key] || (type === 'array' ? '[]' : '{}'));
+        } catch {
+          message.error(`${field.prop.title || field.key} JSON 格式错误`);
+          return;
+        }
       }
     }
   }
   pluginConfigs.saving = true;
   try {
-    await putPluginConfig(pluginConfigs.selected.uuid, value);
-    message.success('插件配置已保存');
+    if (pluginConfigs.configurable) {
+      await putPluginConfig(pluginConfigs.selected.uuid, value);
+    }
+    const marketRow = pluginConfigs.marketRow;
+    if (marketRow && pluginCanOpen(marketRow) && Boolean(marketRow.open) !== pluginConfigs.openToUsers) {
+      const res = await put<ApiEnvelope<{ uuid: string; open: boolean }>>('/api/admin/plugin/open', {
+        uuid: marketRow.id,
+        open: pluginConfigs.openToUsers,
+      });
+      const data = apiData(res);
+      marketRow.open = data.open;
+      if (plugins.detail?.id === marketRow.id) plugins.detail.open = data.open;
+    }
+    message.success('插件设置已保存');
     pluginConfigs.modalOpen = false;
-    await loadPluginConfigs();
+    pluginConfigs.selected = null;
+    pluginConfigs.marketRow = null;
+    pluginConfigs.configurable = false;
+    await Promise.all([loadPluginConfigs(), loadPlugins(plugins.current, plugins.pageSize)]);
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '插件配置保存失败');
+    message.error(error instanceof Error ? error.message : '插件设置保存失败');
   } finally {
     pluginConfigs.saving = false;
   }
@@ -2339,21 +2483,38 @@ function clearClawbotLoginPoll() {
 }
 async function openMarketPluginConfig(row: PluginInfo) {
   if (!pluginInstalled(row)) {
-    message.info('请先安装插件后再配置');
+    message.info('请先安装插件后再设置');
     return;
   }
   pluginConfigs.opening = row.id;
   try {
     await loadPluginConfigs();
     const config = pluginConfigs.rows.find((item) => item.uuid === row.id);
-    if (!config) {
-      message.info('该插件没有可配置项');
-      return;
+    const properties = config?.schema?.properties || {};
+    const panelKinds = new Set<PluginPanelKind>();
+    for (const [key, prop] of Object.entries(properties)) {
+      const kind = pluginPanelKind({ key, prop });
+      if (kind) panelKinds.add(kind);
     }
-    openPluginConfig(config);
+    if (pluginCanOpen(row)) panelKinds.add('smallcat');
+    await Promise.all([
+      panelKinds.has('smallcat') ? loadSmallcatPanels() : Promise.resolve(),
+      panelKinds.has('qinglong') ? loadQinglongPanels() : Promise.resolve(),
+      panelKinds.has('daidai') ? loadDaidaiPanels() : Promise.resolve(),
+    ]);
+    const selected = config || {
+      uuid: row.id,
+      plugin: row.title || row.id,
+      title: row.title || row.id,
+      file: row.address || row.id,
+      registered: row.has_form === true ? false : true,
+      schema: { type: 'object', properties: {} },
+      user_config: {},
+    };
+    openPluginConfig(selected, row, Boolean(config));
     pluginConfigs.modalOpen = true;
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '插件配置加载失败');
+    message.error(error instanceof Error ? error.message : '插件设置加载失败');
   } finally {
     pluginConfigs.opening = '';
   }
@@ -2638,16 +2799,59 @@ async function setBotEnabled(row: { platform: string; label: string; enabled?: b
   }
 }
 
-const settings = reactive({ form: {} as any, githubProxyOptions: [] as string[] });
+type SettingsOptionKind = 'github' | 'pnpm' | 'pipx';
+
+const builtinGithubProxyOptions = [
+  'https://gh-proxy.org',
+  'https://ghproxy.net',
+  'https://cdn.gh-proxy.org',
+  'http://jp-proxy.gitwarp.top:3000',
+  'http://kr1-proxy.gitwarp.top:8081',
+  'http://kr2-proxy.gitwarp.top:9980',
+  'http://jp1-proxy.gitwarp.top:8123',
+];
+const builtinPnpmRegistryOptions = [
+  'https://registry.npmmirror.com',
+  'https://registry.npmjs.org',
+  'https://registry.npm.taobao.org',
+  'https://mirrors.cloud.tencent.com/npm',
+];
+const builtinPipxRegistryOptions = [
+  'https://pypi.tuna.tsinghua.edu.cn/simple',
+  'https://mirrors.aliyun.com/pypi/simple',
+  'https://pypi.doubanio.com/simple',
+  'https://mirrors.ustc.edu.cn/pypi/simple',
+  'https://pypi.org/simple',
+];
+
+const settings = reactive({
+  form: {} as any,
+  githubProxyOptions: [] as string[],
+  pnpmRegistryOptions: [] as string[],
+  pipxRegistryOptions: [] as string[],
+  customGithubProxy: '',
+  customPnpmRegistry: '',
+  customPipxRegistry: '',
+  optionSaving: {} as Record<SettingsOptionKind, boolean>,
+});
+const systemBackup = reactive({ downloading: false });
 const storageBackendOptions = [
   { label: 'BoltDB', value: 'boltdb' },
   { label: 'Redis', value: 'redis' },
+];
+const announcementFormatOptions = [
+  { label: '纯文本', value: 'text' },
+  { label: 'Markdown', value: 'markdown' },
+  { label: 'HTML', value: 'html' },
 ];
 const settingsKeys = [
   'sillyGirl.name',
   'sillyGirl.password',
   'sillyGirl.port',
   'sillyGirl.api_key',
+  'sillyGirl.user_announcement_enable',
+  'sillyGirl.user_announcement',
+  'sillyGirl.user_announcement_format',
   'sillyGirl.debug',
   'sillyGirl.listen_admin',
   'sillyGirl.recall',
@@ -2655,23 +2859,51 @@ const settingsKeys = [
   'sillyGirl.redis_addr',
   'sillyGirl.redis_password',
 ];
+
+function uniqueSettingOptions(values: string[]) {
+  return Array.from(new Set(values.map((item) => String(item || '').trim()).filter(Boolean)));
+}
+
+const VNodes = defineComponent({
+  props: ['vnodes'],
+  setup(props) {
+    return () => props.vnodes;
+  },
+});
+
+function settingSelectOptions(values: string[]) {
+  return uniqueSettingOptions(values).map((value) => ({ value, label: value }));
+}
+
+function settingOptionDeletable(kind: SettingsOptionKind) {
+  const value = String(kind === 'github' ? settings.form.github_proxy : kind === 'pnpm' ? settings.form.pnpm_registry : settings.form.pipx_registry || '').trim();
+  if (!value) return false;
+  const builtins = kind === 'github' ? builtinGithubProxyOptions : kind === 'pnpm' ? builtinPnpmRegistryOptions : builtinPipxRegistryOptions;
+  return !builtins.includes(value);
+}
+
 async function loadSettings() {
   const [res, githubProxyRes, pnpmRegistryRes, pipxRegistryRes] = await Promise.all([
     readStorage<Record<string, any>>(settingsKeys.join(',')),
     get<ApiEnvelope<{ proxy: string; options: string[] }>>('/api/admin/plugins/github-proxy').catch(() => ({ data: { proxy: '', options: [] } })),
-    get<ApiEnvelope<{ registry: string }>>('/api/admin/node/dependency/registry').catch(() => ({ data: { registry: 'https://registry.npmmirror.com' } })),
-    get<ApiEnvelope<{ registry: string }>>('/api/admin/plugin/dependency/registry?runtime=python').catch(() => ({ data: { registry: 'https://pypi.tuna.tsinghua.edu.cn/simple' } })),
+    get<ApiEnvelope<{ registry: string; options: string[] }>>('/api/admin/node/dependency/registry').catch(() => ({ data: { registry: builtinPnpmRegistryOptions[0], options: builtinPnpmRegistryOptions } })),
+    get<ApiEnvelope<{ registry: string; options: string[] }>>('/api/admin/plugin/dependency/registry?runtime=python').catch(() => ({ data: { registry: builtinPipxRegistryOptions[0], options: builtinPipxRegistryOptions } })),
   ]);
   const data = apiData(res) || {};
   const githubProxyData = apiData(githubProxyRes) || { proxy: '', options: [] };
-  const pnpmRegistryData = apiData(pnpmRegistryRes) || { registry: 'https://registry.npmmirror.com' };
-  const pipxRegistryData = apiData(pipxRegistryRes) || { registry: 'https://pypi.tuna.tsinghua.edu.cn/simple' };
-  settings.githubProxyOptions = githubProxyData.options || [];
+  const pnpmRegistryData = apiData(pnpmRegistryRes) || { registry: builtinPnpmRegistryOptions[0], options: builtinPnpmRegistryOptions };
+  const pipxRegistryData = apiData(pipxRegistryRes) || { registry: builtinPipxRegistryOptions[0], options: builtinPipxRegistryOptions };
+  settings.githubProxyOptions = uniqueSettingOptions(githubProxyData.options || []);
+  settings.pnpmRegistryOptions = uniqueSettingOptions(pnpmRegistryData.options || [pnpmRegistryData.registry || builtinPnpmRegistryOptions[0]]);
+  settings.pipxRegistryOptions = uniqueSettingOptions(pipxRegistryData.options || [pipxRegistryData.registry || builtinPipxRegistryOptions[0]]);
   settings.form = {
     name: data['sillyGirl.name'],
     password: '',
     port: Number(data['sillyGirl.port'] || 8080),
     api_key: data['sillyGirl.api_key'],
+    user_announcement_enable: data['sillyGirl.user_announcement_enable'] === true || data['sillyGirl.user_announcement_enable'] === 'true',
+    user_announcement: data['sillyGirl.user_announcement'] || '',
+    user_announcement_format: ['text', 'markdown', 'html'].includes(String(data['sillyGirl.user_announcement_format'] || '')) ? data['sillyGirl.user_announcement_format'] : 'text',
     debug: data['sillyGirl.debug'] === true || data['sillyGirl.debug'] === 'true',
     listen_admin: data['sillyGirl.listen_admin'] !== false && data['sillyGirl.listen_admin'] !== 'false',
     recall: data['sillyGirl.recall'],
@@ -2679,8 +2911,8 @@ async function loadSettings() {
     redis_addr: data['sillyGirl.redis_addr'],
     redis_password: data['sillyGirl.redis_password'],
     github_proxy: githubProxyData.proxy || '',
-    pnpm_registry: pnpmRegistryData.registry || 'https://registry.npmmirror.com',
-    pipx_registry: pipxRegistryData.registry || 'https://pypi.tuna.tsinghua.edu.cn/simple',
+    pnpm_registry: pnpmRegistryData.registry || builtinPnpmRegistryOptions[0],
+    pipx_registry: pipxRegistryData.registry || builtinPipxRegistryOptions[0],
   };
 }
 async function saveSettings() {
@@ -2689,6 +2921,9 @@ async function saveSettings() {
     'sillyGirl.name': v.name || '',
     'sillyGirl.port': v.port || 8080,
     'sillyGirl.api_key': v.api_key || '',
+    'sillyGirl.user_announcement_enable': !!v.user_announcement_enable,
+    'sillyGirl.user_announcement': v.user_announcement || '',
+    'sillyGirl.user_announcement_format': v.user_announcement_format || 'text',
     'sillyGirl.debug': !!v.debug,
     'sillyGirl.listen_admin': !!v.listen_admin,
     'sillyGirl.recall': v.recall || '',
@@ -2711,6 +2946,119 @@ async function saveSettings() {
   nodeDeps.registry = currentDependencyTool.value.registry || nodeDeps.registry;
   message.success('设置已保存');
   loadUser();
+}
+
+async function addSettingsOption(kind: SettingsOptionKind) {
+  const draftKey = kind === 'github' ? 'customGithubProxy' : kind === 'pnpm' ? 'customPnpmRegistry' : 'customPipxRegistry';
+  const value = String(settings[draftKey] || '').trim();
+  if (!value) {
+    message.error('请输入地址');
+    return;
+  }
+  settings.optionSaving[kind] = true;
+  try {
+    if (kind === 'github') {
+      const res = await post<ApiEnvelope<{ added?: string; options?: string[] }>>('/api/admin/plugins/github-proxy', { proxy: value });
+      const data = apiData(res) || {};
+      settings.githubProxyOptions = uniqueSettingOptions(data.options || [...settings.githubProxyOptions, data.added || value]);
+      settings.form.github_proxy = data.added || value;
+    } else if (kind === 'pnpm') {
+      const res = await post<ApiEnvelope<{ added?: string; options?: string[] }>>('/api/admin/node/dependency/registry', { registry: value });
+      const data = apiData(res) || {};
+      settings.pnpmRegistryOptions = uniqueSettingOptions(data.options || [...settings.pnpmRegistryOptions, data.added || value]);
+      settings.form.pnpm_registry = data.added || value;
+    } else {
+      const res = await post<ApiEnvelope<{ added?: string; options?: string[] }>>('/api/admin/plugin/dependency/registry', { runtime: 'python', registry: value });
+      const data = apiData(res) || {};
+      settings.pipxRegistryOptions = uniqueSettingOptions(data.options || [...settings.pipxRegistryOptions, data.added || value]);
+      settings.form.pipx_registry = data.added || value;
+    }
+    settings[draftKey] = '';
+    message.success('地址已添加');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '地址添加失败');
+  } finally {
+    settings.optionSaving[kind] = false;
+  }
+}
+
+async function removeSettingsOption(kind: SettingsOptionKind) {
+  const value = String(kind === 'github' ? settings.form.github_proxy : kind === 'pnpm' ? settings.form.pnpm_registry : settings.form.pipx_registry || '').trim();
+  if (!value) {
+    message.error('请选择要删除的地址');
+    return;
+  }
+  settings.optionSaving[kind] = true;
+  try {
+    if (kind === 'github') {
+      const res = await del<ApiEnvelope<{ proxy?: string; options?: string[] }>>('/api/admin/plugins/github-proxy', { proxy: value });
+      const data = apiData(res) || {};
+      settings.githubProxyOptions = uniqueSettingOptions(data.options || settings.githubProxyOptions.filter((item) => item !== value));
+      settings.form.github_proxy = data.proxy || '';
+    } else if (kind === 'pnpm') {
+      const res = await del<ApiEnvelope<{ registry?: string; options?: string[] }>>('/api/admin/node/dependency/registry', { registry: value });
+      const data = apiData(res) || {};
+      settings.pnpmRegistryOptions = uniqueSettingOptions(data.options || settings.pnpmRegistryOptions.filter((item) => item !== value));
+      settings.form.pnpm_registry = data.registry || builtinPnpmRegistryOptions[0];
+      nodeDeps.pnpm.registry = settings.form.pnpm_registry;
+    } else {
+      const res = await del<ApiEnvelope<{ registry?: string; options?: string[] }>>('/api/admin/plugin/dependency/registry', { runtime: 'python', registry: value });
+      const data = apiData(res) || {};
+      settings.pipxRegistryOptions = uniqueSettingOptions(data.options || settings.pipxRegistryOptions.filter((item) => item !== value));
+      settings.form.pipx_registry = data.registry || builtinPipxRegistryOptions[0];
+      nodeDeps.pipx.registry = settings.form.pipx_registry;
+    }
+    message.success('地址已删除');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '地址删除失败');
+  } finally {
+    settings.optionSaving[kind] = false;
+  }
+}
+
+function systemBackupFilename(contentDisposition: string) {
+  const encoded = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded.replace(/^"|"$/g, ''));
+    } catch (_) {
+      // Fall through to the plain filename value.
+    }
+  }
+  const fallbackTime = new Date().toISOString().replace(/[:.]/g, '-');
+  return contentDisposition.match(/filename="?([^";]+)"?/i)?.[1] || `sillygirl-backup-${fallbackTime}.zip`;
+}
+
+async function downloadSystemBackup() {
+  systemBackup.downloading = true;
+  try {
+    const headers = new Headers();
+    const token = getAuthToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch('/api/admin/backup', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.message || `备份下载失败（HTTP ${response.status}）`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = systemBackupFilename(response.headers.get('content-disposition') || '');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    message.success('备份已生成并开始下载');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '备份下载失败');
+  } finally {
+    systemBackup.downloading = false;
+  }
 }
 
 const messageBuckets = {
@@ -2860,15 +3208,15 @@ function smallcatOpenids(record?: AdminUserRow) {
             <Typography.Paragraph class="muted">首次使用需要创建后台账号和密码。</Typography.Paragraph>
             <Form layout="vertical" @finish="setupAdmin">
               <Form.Item label="账号" required>
-                <Input v-model:value="setupModel.username">
+                <Input id="setup-username" name="setup-username" v-model:value="setupModel.username">
                   <template #prefix><User :size="16" /></template>
                 </Input>
               </Form.Item>
               <Form.Item label="密码" required>
-                <Input.Password v-model:value="setupModel.password" />
+                <Input.Password id="setup-password" name="setup-password" v-model:value="setupModel.password" />
               </Form.Item>
               <Form.Item label="确认密码" required>
-                <Input.Password v-model:value="setupModel.confirm" />
+                <Input.Password id="setup-confirm" name="setup-confirm" v-model:value="setupModel.confirm" />
               </Form.Item>
               <Button type="primary" html-type="button" block @click="setupAdmin">创建账号</Button>
             </Form>
@@ -2878,12 +3226,12 @@ function smallcatOpenids(record?: AdminUserRow) {
             <Typography.Paragraph class="muted">使用后台账号和密码登录。</Typography.Paragraph>
             <Form layout="vertical" @finish="login">
               <Form.Item label="账号" required>
-                <Input v-model:value="loginModel.username">
+                <Input id="login-username" name="login-username" autocomplete="username" v-model:value="loginModel.username">
                   <template #prefix><User :size="16" /></template>
                 </Input>
               </Form.Item>
               <Form.Item label="密码" required>
-                <Input.Password v-model:value="loginModel.password" />
+                <Input.Password id="login-password" name="login-password" autocomplete="current-password" v-model:value="loginModel.password" />
               </Form.Item>
               <Button type="primary" html-type="button" block @click="login">登录</Button>
             </Form>
@@ -3214,72 +3562,6 @@ function smallcatOpenids(record?: AdminUserRow) {
                 </Space>
               </div>
             </Modal>
-
-            <section v-if="page === 'scripts'" class="panel">
-              <div class="script-workbench">
-                <aside class="script-file-panel">
-                  <div class="script-file-header">
-                    <Space size="small">
-                      <FolderOpen :size="16" />
-                      <Typography.Text strong>文件管理</Typography.Text>
-                    </Space>
-                    <Tag>{{ realScripts.length }}</Tag>
-                  </div>
-                  <Input id="script-file-search" name="script-file-search" v-model:value="scriptKeyword" allow-clear placeholder="搜索脚本文件">
-                    <template #prefix><Search :size="15" /></template>
-                  </Input>
-                  <div class="script-file-actions">
-                    <Button type="primary" block @click="openCreateScriptModal"><template #icon><Plus :size="16" /></template>新增脚本</Button>
-                    <Button block @click="loadUser"><template #icon><RefreshCw :size="16" /></template>刷新列表</Button>
-                  </div>
-                  <div class="script-file-list">
-                    <button
-                      v-for="item in scriptFileRows"
-                      :key="item.path"
-                      type="button"
-                      class="script-file-row"
-                      :class="{ active: scriptFileId(item) === currentScriptId, pending: isNewScriptEntry(item) }"
-                      @click="selectScriptFile(item)"
-                    >
-                      <FileCode2 :size="16" />
-                      <span class="script-file-main">
-                        <span class="script-file-name">{{ scriptDisplayName(item) }}</span>
-                        <span class="script-file-meta">{{ scriptFileName(item) }}</span>
-                      </span>
-                      <Tag v-if="isNewScriptEntry(item)" color="blue">新建</Tag>
-                    </button>
-                    <Empty v-if="scriptFileRows.length === 0" description="暂无脚本文件" />
-                  </div>
-                </aside>
-
-                <div class="script-editor-panel">
-                  <div class="script-editor-header">
-                    <div class="script-editor-title">
-                      <Typography.Text strong>{{ scriptDisplayName(currentScriptFile) }}</Typography.Text>
-                      <Typography.Text class="muted mono">{{ scriptFileName(currentScriptFile) }}</Typography.Text>
-                    </div>
-                    <div class="script-editor-actions">
-                      <Button @click="loadScript()"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
-                      <Button @click="formatScript" :disabled="scriptState.loading || !currentScriptId">
-                        <template #icon><Wand2 :size="16" /></template>格式化
-                      </Button>
-                      <Button type="primary" @click="saveScript()" :disabled="!currentScriptId">
-                        <template #icon><Save :size="16" /></template>保存
-                      </Button>
-                      <Popconfirm title="确认卸载这个脚本？" @confirm="removeScript">
-                        <Button danger :disabled="!currentScriptId"><template #icon><Trash2 :size="16" /></template>卸载</Button>
-                      </Popconfirm>
-                    </div>
-                  </div>
-                  <div ref="scriptEditorHost" class="code-editor script-code-editor" />
-                  <div class="script-editor-status">
-                    <span>{{ scriptRuntimeLabel() }}</span>
-                    <span>{{ scriptState.content.split('\n').length }} 行</span>
-                    <span>{{ scriptState.content.length }} 字符</span>
-                  </div>
-                </div>
-              </div>
-            </section>
 
             <section v-if="page === 'dependencies'" class="panel">
               <div class="toolbar">
@@ -3747,6 +4029,13 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <TabPane key="tab2" :tab="`未安装 ${plugins.meta.tab2 ?? ''}`" />
                 <TabPane key="tab3" :tab="`可更新 ${plugins.meta.tab3 ?? ''}`" />
               </Tabs>
+              <Alert
+                type="info"
+                show-icon
+                message="操作提示"
+                description="点击插件图标可以打开插件源码编辑器；点击插件名字可以查看插件介绍。"
+                style="margin-bottom: 12px"
+              />
               <div class="toolbar-left" style="margin-bottom: 12px">
                 <Input id="plugin-market-search" v-model:value="plugins.keyword" name="plugin-market-search" allow-clear style="width: 260px" placeholder="搜索插件或来源" @press-enter="loadPlugins()" />
                 <Select
@@ -3763,6 +4052,7 @@ function smallcatOpenids(record?: AdminUserRow) {
                   <template #icon><Settings :size="16" /></template>管理插件源
                 </Button>
                 <Button @click="loadPlugins(1, 12, true)"><template #icon><RefreshCw :size="16" /></template>刷新</Button>
+                <Button type="primary" @click="openNewMarketPluginEditor"><template #icon><Plus :size="16" /></template>新增插件</Button>
               </div>
               <Spin :spinning="plugins.loading">
                 <div v-if="plugins.rows.length" class="plugin-market-grid">
@@ -3770,8 +4060,8 @@ function smallcatOpenids(record?: AdminUserRow) {
                     <button
                       type="button"
                       class="plugin-card-icon"
-                      :aria-label="`查看 ${record.title || record.id} 介绍`"
-                      @click="openPluginDetail(record)"
+                      :aria-label="`编辑 ${record.title || record.id} 源码`"
+                      @click="openMarketPluginEditor(record)"
                     >
                       <img v-if="pluginIconIsImage(record)" :src="record.icon" :alt="record.title || record.id" />
                       <span v-else>{{ pluginInitial(record) }}</span>
@@ -3791,46 +4081,39 @@ function smallcatOpenids(record?: AdminUserRow) {
                     </div>
                     <div class="plugin-card-actions">
                       <Button
-                        v-if="pluginCanOpen(record)"
-                        class="plugin-card-open"
-                        :class="{ 'is-open': record.open }"
-                        shape="circle"
-                        :loading="plugins.opening[record.id]"
-                        :title="record.open ? '取消 Home 页面开放' : '开放到 Home 页面'"
-                        :aria-label="`${record.open ? '取消开放' : '开放'}${record.title || record.id}`"
-                        @click="togglePluginOpen(record)"
-                      >
-                        <template #icon><DoorOpen :size="18" /></template>
-                      </Button>
-                      <Button
-                        v-if="pluginCanConfigure(record)"
+                        v-if="pluginCanManage(record)"
                         class="plugin-card-settings"
                         shape="circle"
                         :loading="pluginConfigs.opening === record.id"
-                        title="插件配置"
-                        :aria-label="`${record.title || record.id}插件配置`"
+                        title="插件设置"
+                        :aria-label="`${record.title || record.id}插件设置`"
                         @click="openMarketPluginConfig(record)"
                       >
                         <template #icon><Settings :size="18" /></template>
                       </Button>
-                      <Popconfirm
-                        v-if="pluginInstalled(record)"
-                        :title="`确认卸载「${record.title || record.id}」？`"
-                        ok-text="确认卸载"
-                        cancel-text="取消"
-                        @confirm="uninstallPlugin(record)"
+                      <Button
+                        v-if="pluginUpgradable(record)"
+                        class="plugin-card-upgrade"
+                        shape="circle"
+                        :loading="plugins.installing[record.id]"
+                        :title="`升级 ${record.title || record.id}`"
+                        :aria-label="`升级 ${record.title || record.id}`"
+                        @click="installPlugin(record)"
                       >
-                        <Button
-                          class="plugin-card-remove"
-                          shape="circle"
-                          danger
-                          :loading="plugins.uninstalling[record.id]"
-                          :title="`卸载 ${record.title || record.id}`"
-                          :aria-label="`卸载 ${record.title || record.id}`"
-                        >
-                          <template #icon><Trash2 :size="18" /></template>
-                        </Button>
-                      </Popconfirm>
+                        <template #icon><ArrowUp :size="20" /></template>
+                      </Button>
+                      <Button
+                        v-else-if="pluginInstalled(record)"
+                        class="plugin-card-remove"
+                        shape="circle"
+                        danger
+                        :loading="plugins.uninstalling[record.id]"
+                        :title="`卸载 ${record.title || record.id}`"
+                        :aria-label="`卸载 ${record.title || record.id}`"
+                        @click="openUninstallPluginModal(record)"
+                      >
+                        <template #icon><Trash2 :size="18" /></template>
+                      </Button>
                       <Button
                         v-else
                         class="plugin-card-download"
@@ -3864,6 +4147,16 @@ function smallcatOpenids(record?: AdminUserRow) {
                 <Form.Item label="修改密码"><Input.Password v-model:value="settings.form.password" placeholder="留空表示不修改" /></Form.Item>
                 <Form.Item label="HTTP 端口"><InputNumber v-model:value="settings.form.port" style="width: 100%" :min="1" :max="65535" /></Form.Item>
                 <Form.Item label="API Key"><Input v-model:value="settings.form.api_key" /></Form.Item>
+                <Typography.Title :level="5">普通用户公告</Typography.Title>
+                <Form.Item label="在 user 页面显示公告">
+                  <Switch v-model:checked="settings.form.user_announcement_enable" />
+                </Form.Item>
+                <Form.Item label="公告格式">
+                  <Select v-model:value="settings.form.user_announcement_format" :options="announcementFormatOptions" />
+                </Form.Item>
+                <Form.Item label="公告内容" extra="开启后会显示在普通用户 /user 页面顶部；纯文本保留换行，Markdown 支持常用标题/列表/链接/加粗/代码，HTML 会按原样渲染。">
+                  <Input.TextArea v-model:value="settings.form.user_announcement" :rows="6" placeholder="请输入要展示给普通用户的公告，支持纯文本 / Markdown / HTML" />
+                </Form.Item>
                 <Form.Item label="自动撤回正则"><Input.TextArea v-model:value="settings.form.recall" :rows="2" /></Form.Item>
                 <Form.Item label="存储后端"><Select v-model:value="settings.form.storage" :options="storageBackendOptions" /></Form.Item>
                 <template v-if="settings.form.storage === 'redis'">
@@ -3872,23 +4165,88 @@ function smallcatOpenids(record?: AdminUserRow) {
                 </template>
                 <Typography.Title :level="5">网络与镜像</Typography.Title>
                 <Form.Item label="GitHub 加速" extra="用于读取 GitHub 插件源和下载 GitHub 插件；选择关闭表示直连。">
-                  <Select
-                    v-model:value="settings.form.github_proxy"
-                    :options="[
-                      { value: '', label: '关闭加速' },
-                      ...settings.githubProxyOptions.map((value) => ({ value, label: value })),
-                    ]"
-                  />
+                  <Space.Compact style="width: 100%">
+                    <Select
+                      v-model:value="settings.form.github_proxy"
+                      style="width: calc(100% - 92px)"
+                      :options="[
+                        { value: '', label: '关闭加速' },
+                        ...settingSelectOptions(settings.githubProxyOptions),
+                      ]"
+                    >
+                      <template #dropdownRender="{ menuNode: menu }">
+                        <VNodes :vnodes="menu" />
+                        <div class="settings-select-add" @mousedown.stop>
+                          <Input v-model:value="settings.customGithubProxy" placeholder="输入自定义 GitHub 加速地址" @press-enter="addSettingsOption('github')" />
+                          <Button type="primary" shape="circle" :loading="settings.optionSaving.github" title="添加" @mousedown.prevent.stop @click="addSettingsOption('github')">
+                            <template #icon><Plus :size="16" /></template>
+                          </Button>
+                        </div>
+                      </template>
+                    </Select>
+                    <Button :loading="settings.optionSaving.github" :disabled="!settingOptionDeletable('github')" @click="removeSettingsOption('github')">删除</Button>
+                  </Space.Compact>
                 </Form.Item>
                 <Form.Item label="pnpm 镜像" extra="用于安装和更新脚本插件的 NodeJS 依赖。">
-                  <Input v-model:value="settings.form.pnpm_registry" placeholder="https://registry.npmmirror.com" />
+                  <Space.Compact style="width: 100%">
+                    <Select
+                      v-model:value="settings.form.pnpm_registry"
+                      show-search
+                      style="width: calc(100% - 92px)"
+                      :options="settingSelectOptions(settings.pnpmRegistryOptions)"
+                    >
+                      <template #dropdownRender="{ menuNode: menu }">
+                        <VNodes :vnodes="menu" />
+                        <div class="settings-select-add" @mousedown.stop>
+                          <Input v-model:value="settings.customPnpmRegistry" placeholder="输入自定义 npm/pnpm registry" @press-enter="addSettingsOption('pnpm')" />
+                          <Button type="primary" shape="circle" :loading="settings.optionSaving.pnpm" title="添加" @mousedown.prevent.stop @click="addSettingsOption('pnpm')">
+                            <template #icon><Plus :size="16" /></template>
+                          </Button>
+                        </div>
+                      </template>
+                    </Select>
+                    <Button :loading="settings.optionSaving.pnpm" :disabled="!settingOptionDeletable('pnpm')" @click="removeSettingsOption('pnpm')">删除</Button>
+                  </Space.Compact>
                 </Form.Item>
                 <Form.Item label="pipx 源" extra="用于安装 Python 脚本插件依赖。">
-                  <Input v-model:value="settings.form.pipx_registry" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple" />
+                  <Space.Compact style="width: 100%">
+                    <Select
+                      v-model:value="settings.form.pipx_registry"
+                      show-search
+                      style="width: calc(100% - 92px)"
+                      :options="settingSelectOptions(settings.pipxRegistryOptions)"
+                    >
+                      <template #dropdownRender="{ menuNode: menu }">
+                        <VNodes :vnodes="menu" />
+                        <div class="settings-select-add" @mousedown.stop>
+                          <Input v-model:value="settings.customPipxRegistry" placeholder="输入自定义 pip/PyPI 源" @press-enter="addSettingsOption('pipx')" />
+                          <Button type="primary" shape="circle" :loading="settings.optionSaving.pipx" title="添加" @mousedown.prevent.stop @click="addSettingsOption('pipx')">
+                            <template #icon><Plus :size="16" /></template>
+                          </Button>
+                        </div>
+                      </template>
+                    </Select>
+                    <Button :loading="settings.optionSaving.pipx" :disabled="!settingOptionDeletable('pipx')" @click="removeSettingsOption('pipx')">删除</Button>
+                  </Space.Compact>
                 </Form.Item>
                 <Form.Item label="系统调试模式"><Switch v-model:checked="settings.form.debug" /></Form.Item>
                 <Form.Item label="未监听群允许管理员触发"><Switch v-model:checked="settings.form.listen_admin" /></Form.Item>
                 <Button type="primary" @click="saveSettings"><template #icon><Save :size="16" /></template>保存设置</Button>
+                <Typography.Title :level="5" class="settings-backup-title">数据备份</Typography.Title>
+                <Card size="small" class="settings-backup-card">
+                  <Typography.Paragraph class="settings-backup-description">
+                    下载包含全部存储桶、用户与 BOT 配置、插件配置及脚本源文件的 ZIP 备份。运行时依赖、缓存、PID 和锁文件不会打包。
+                  </Typography.Paragraph>
+                  <Alert
+                    type="warning"
+                    show-icon
+                    message="备份包含账号绑定、Token 和密钥等敏感配置，请妥善保管。"
+                    style="margin-bottom: 14px"
+                  />
+                  <Button :loading="systemBackup.downloading" @click="downloadSystemBackup">
+                    <template #icon><Download :size="16" /></template>下载备份
+                  </Button>
+                </Card>
               </Form>
             </section>
 
@@ -4016,28 +4374,65 @@ function smallcatOpenids(record?: AdminUserRow) {
       </Modal>
 
       <Modal
-        v-model:open="scriptCreateState.open"
-        title="新增脚本插件"
-        :confirm-loading="scriptCreateState.saving"
-        ok-text="确认创建"
-        cancel-text="取消"
-        @ok="createScript"
+        v-model:open="pluginEditor.open"
+        :title="pluginEditor.isNew ? '新增本地插件' : `编辑插件：${pluginEditor.title || pluginEditor.id}`"
+        width="1080px"
+        :footer="null"
+        :destroy-on-close="true"
+        @cancel="closeMarketPluginEditor"
+        @after-open-change="handlePluginEditorOpenChange"
       >
-        <Form layout="vertical">
-          <Form.Item label="脚本名称" html-for="script-create-name" required extra="只填写名称，系统会按下面选择的类型自动添加后缀。">
-            <Input id="script-create-name" v-model:value="scriptCreateState.fileName" placeholder="例如：daily-sign" @press-enter="createScript" />
-          </Form.Item>
-          <Form.Item label="脚本类型" html-for="script-create-suffix" required>
-            <Select
-              id="script-create-suffix"
-              v-model:value="scriptCreateState.suffix"
-              :options="[
-                { label: 'NodeJS（.js）', value: '.js' },
-                { label: 'Python（.py）', value: '.py' },
-              ]"
+        <Spin :spinning="pluginEditor.loading">
+          <Space direction="vertical" style="width: 100%" size="middle">
+            <Alert
+              type="info"
+              show-icon
+              message="本地新增插件会自动作为非公开插件进入插件市场；保存前必须包含 [title: xxx]、[name: 文件名]、[description: xxx]、[version: vx.y.z]，以及 [rule: xxx] 或 [cron: xxx]/[on_start: true]/[web: true]。"
             />
-          </Form.Item>
-        </Form>
+            <Form layout="inline" class="plugin-editor-meta">
+              <Form.Item label="插件名称" required extra="新增时必须和源码里的 [name: xxx] 一致">
+                <Input v-model:value="pluginEditor.name" style="width: 260px" placeholder="例如 localPlugin" :disabled="pluginEditor.installed && !pluginEditor.isNew" />
+              </Form.Item>
+              <Form.Item label="类型" required>
+                <Select
+                  v-model:value="pluginEditor.type"
+                  style="width: 160px"
+                  :options="[
+                    { label: 'NodeJS', value: 'node' },
+                    { label: 'Python', value: 'python' },
+                  ]"
+                  @change="syncPluginEditorLanguage"
+                />
+              </Form.Item>
+              <Form.Item>
+                <Tag :color="pluginEditor.installed ? 'green' : 'blue'">{{ pluginEditor.installed ? '本地已安装' : '未安装/远程源码' }}</Tag>
+              </Form.Item>
+              <Form.Item>
+                <Button @click="togglePluginEditorTheme">
+                  <template #icon><Moon v-if="pluginEditor.theme === 'dark'" :size="16" /><Sun v-else :size="16" /></template>
+                  {{ pluginEditor.theme === 'dark' ? '黑底' : '白底' }}
+                </Button>
+              </Form.Item>
+            </Form>
+            <div
+              ref="pluginEditorHost"
+              class="script-code-editor plugin-market-code-editor"
+              :class="{ 'plugin-market-code-editor-dark': pluginEditor.theme === 'dark', 'plugin-market-code-editor-light': pluginEditor.theme === 'light' }"
+            ></div>
+            <Space style="justify-content: flex-end; width: 100%">
+              <Popconfirm
+                v-if="pluginEditor.installed && !pluginEditor.isNew"
+                title="确认删除这个本地插件文件？"
+                @confirm="deleteMarketPluginEditor"
+              >
+                <Button danger :loading="pluginEditor.deleting"><template #icon><Trash2 :size="16" /></template>删除</Button>
+              </Popconfirm>
+              <Button @click="formatMarketPluginEditor"><template #icon><Wand2 :size="16" /></template>格式化</Button>
+              <Button @click="closeMarketPluginEditor">取消</Button>
+              <Button type="primary" :loading="pluginEditor.saving" @click="saveMarketPluginEditor"><template #icon><Save :size="16" /></template>保存</Button>
+            </Space>
+          </Space>
+        </Spin>
       </Modal>
 
       <Modal
@@ -4252,72 +4647,137 @@ function smallcatOpenids(record?: AdminUserRow) {
       </Modal>
 
       <Modal
+        v-model:open="plugins.uninstallModal.open"
+        title="卸载插件"
+        width="620px"
+        ok-text="确认卸载"
+        cancel-text="取消"
+        :confirm-loading="plugins.uninstallModal.row ? plugins.uninstalling[plugins.uninstallModal.row.id] : false"
+        :ok-button-props="{ danger: true }"
+        @ok="confirmUninstallPlugin"
+        @cancel="cancelUninstallPluginModal"
+      >
+        <Space v-if="plugins.uninstallModal.row" direction="vertical" size="middle" style="width: 100%">
+          <Alert
+            type="warning"
+            show-icon
+            :message="`确认卸载「${plugins.uninstallModal.row.title || plugins.uninstallModal.row.id}」？`"
+            description="卸载会删除本地插件脚本文件并停止正在运行的插件任务。"
+          />
+          <Checkbox v-model:checked="plugins.uninstallModal.deleteConfig">
+            同步删除插件配置
+          </Checkbox>
+          <Typography.Paragraph class="muted" style="margin-bottom: 0">
+            勾选后会同时删除该插件的配置值和配置表单缓存；不勾选则保留配置，后续重新安装可继续使用。
+          </Typography.Paragraph>
+        </Space>
+      </Modal>
+
+      <Modal
         v-model:open="pluginConfigs.modalOpen"
-        :title="`${pluginConfigs.selected?.plugin || pluginConfigs.selected?.title || '插件'} 配置`"
+        :title="`${pluginConfigs.selected?.plugin || pluginConfigs.selected?.title || '插件'} 设置`"
         width="720px"
-        ok-text="保存配置"
+        ok-text="保存"
         cancel-text="取消"
         :confirm-loading="pluginConfigs.saving"
-        :ok-button-props="{ disabled: !pluginConfigs.selected || pluginConfigs.selected.registered === false }"
+        :ok-button-props="{ disabled: !pluginSettingsCanSave }"
         @ok="savePluginConfig"
       >
         <Spin :spinning="pluginConfigs.loading">
-          <div v-if="pluginConfigs.selected" class="config-form plugin-config-modal-form">
-            <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
-            <Alert
-              v-if="pluginConfigs.selected.registered === false"
-              type="warning"
-              show-icon
-              style="margin-top: 16px"
-              message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new SillyGirlPluginConfig(schema) 或 form(schema) 在脚本顶层执行，且脚本初始化没有报错。"
-            />
-            <Form layout="vertical" style="margin-top: 16px">
-              <template v-for="field in schemaFields" :key="field.key">
-                <Form.Item :label="field.prop.title || field.key" :html-for="`plugin-config-${field.key}`" :extra="field.prop.description">
-                  <Select
-                    v-if="fieldType(field.prop) === 'enum'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    :options="fieldOptions(field.prop)"
-                  />
-                  <Switch
-                    v-else-if="fieldType(field.prop) === 'boolean'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:checked="pluginConfigs.form[field.key]"
-                  />
-                  <InputNumber
-                    v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
-                    :id="`plugin-config-${field.key}`"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    style="width: 100%"
-                    :min="field.prop.minimum"
-                    :max="field.prop.maximum"
-                  />
-                  <Input.TextArea
-                    v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.text[field.key]"
-                    :rows="6"
-                    class="mono"
-                  />
-                  <Input.Password
-                    v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.form[field.key]"
-                  />
-                  <Input.TextArea
-                    v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
-                    :id="`plugin-config-${field.key}`"
-                    :name="field.key"
-                    v-model:value="pluginConfigs.form[field.key]"
-                    :rows="4"
-                  />
-                  <Input v-else :id="`plugin-config-${field.key}`" :name="field.key" v-model:value="pluginConfigs.form[field.key]" />
-                </Form.Item>
-              </template>
-            </Form>
+          <div v-if="pluginConfigs.selected" class="plugin-settings-modal-body">
+            <section v-if="pluginOpenAvailable" class="plugin-user-open-setting">
+              <div class="plugin-user-open-copy">
+                <Typography.Text strong>是否开放为普通用户</Typography.Text>
+                <Typography.Text type="secondary">
+                  开启后普通用户可在 Home 页面看到该插件，并自行决定是否授权其读取 SmallCat 账号列表。
+                </Typography.Text>
+              </div>
+              <Switch
+                id="plugin-open-to-users"
+                v-model:checked="pluginConfigs.openToUsers"
+                aria-label="是否开放为普通用户"
+              />
+            </section>
+            <div
+              v-if="pluginConfigs.configurable || pluginConfigs.selected.registered === false"
+              class="config-form plugin-config-modal-form"
+            >
+              <Typography.Text class="muted mono">{{ pluginConfigs.selected.file || 'main.js' }}</Typography.Text>
+              <Alert
+                v-if="pluginConfigs.selected.registered === false"
+                type="warning"
+                show-icon
+                style="margin-top: 16px"
+                message="该插件检测到配置代码，但安装时没有成功导出配置表单。请确认 new form({...}) 在脚本顶层执行，且脚本初始化没有报错。"
+              />
+              <Form v-if="pluginConfigs.configurable" layout="vertical" style="margin-top: 16px">
+                <template v-for="field in schemaFields" :key="field.key">
+                  <Form.Item
+                    v-if="pluginConfigFieldVisible(field)"
+                    :label="field.prop.title || field.key"
+                    :html-for="`plugin-config-${field.key}`"
+                    :extra="field.prop.description"
+                  >
+                    <template v-if="pluginPanelKind(field)">
+                      <Radio.Group
+                        :id="`plugin-config-${field.key}`"
+                        v-model:value="pluginConfigs.form[field.key]"
+                        class="plugin-panel-id-picker"
+                        button-style="solid"
+                        :aria-label="field.prop.title || field.key"
+                      >
+                        <Radio.Button v-for="id in pluginPanelChoices(field)" :key="id" :value="id">{{ id }}</Radio.Button>
+                      </Radio.Group>
+                      <div v-if="!pluginPanelChoices(field).length" class="plugin-panel-empty">
+                        {{ pluginPanelEmptyText(field) }}
+                      </div>
+                    </template>
+                    <Select
+                      v-else-if="fieldType(field.prop) === 'enum'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      :options="fieldOptions(field.prop)"
+                    />
+                    <Switch
+                      v-else-if="fieldType(field.prop) === 'boolean'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:checked="pluginConfigs.form[field.key]"
+                    />
+                    <InputNumber
+                      v-else-if="fieldType(field.prop) === 'number' || fieldType(field.prop) === 'integer'"
+                      :id="`plugin-config-${field.key}`"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      style="width: 100%"
+                      :min="field.prop.minimum"
+                      :max="field.prop.maximum"
+                    />
+                    <Input.TextArea
+                      v-else-if="fieldType(field.prop) === 'object' || fieldType(field.prop) === 'array'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.text[field.key]"
+                      :rows="6"
+                      class="mono"
+                    />
+                    <Input.Password
+                      v-else-if="field.prop.format === 'password' || field.prop['ui:widget'] === 'password'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.form[field.key]"
+                    />
+                    <Input.TextArea
+                      v-else-if="field.prop.format === 'textarea' || field.prop['ui:widget'] === 'textarea'"
+                      :id="`plugin-config-${field.key}`"
+                      :name="field.key"
+                      v-model:value="pluginConfigs.form[field.key]"
+                      :rows="4"
+                    />
+                    <Input v-else :id="`plugin-config-${field.key}`" :name="field.key" v-model:value="pluginConfigs.form[field.key]" />
+                  </Form.Item>
+                </template>
+              </Form>
+            </div>
+            <Empty v-else description="该插件没有其他配置项" />
           </div>
         </Spin>
       </Modal>

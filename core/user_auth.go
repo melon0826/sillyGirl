@@ -21,7 +21,7 @@ import (
 
 var userBucket = MakeBucket("users")
 
-const userJWTExpireSeconds = 86400 * 30
+const userJWTExpireSeconds = 7 * 24 * 60 * 60
 
 var (
 	userNamePattern      = regexp.MustCompile(`^[A-Za-z0-9_\-.]{3,32}$`)
@@ -220,10 +220,18 @@ func init() {
 			ApiError(ctx, http.StatusUnauthorized, "请先登录")
 			return
 		}
+		announcement := strings.TrimSpace(sillyGirl.GetString("user_announcement"))
+		announcementEnabledValue := GetBucketKeyValue(sillyGirl, "user_announcement_enable")
+		announcementEnabled := announcementEnabledValue == true || fmt.Sprint(announcementEnabledValue) == "true"
 		ApiOK(ctx, gin.H{
 			"user":            toPublicNormalUser(user),
 			"bindings":        loadNormalUserBindings(user.Username),
 			"smallcat_panels": publicSmallcatPanels(),
+			"announcement": gin.H{
+				"enabled": announcementEnabled,
+				"content": announcement,
+				"format":  normalizeUserAnnouncementFormat(sillyGirl.GetString("user_announcement_format")),
+			},
 		})
 	})
 
@@ -796,7 +804,7 @@ func parseUserJWT(token string) (*userJWTClaims, error) {
 	if claims.Sub == "" || claims.UID == "" {
 		return nil, errors.New("JWT 缺少用户信息")
 	}
-	if claims.Exp <= time.Now().Unix() {
+	if jwtClaimsExpired(time.Now().Unix(), claims.Iat, claims.Exp, userJWTExpireSeconds) {
 		return nil, errors.New("JWT 已过期")
 	}
 	return claims, nil
@@ -1055,6 +1063,17 @@ func findStringInJSON(value interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeUserAnnouncementFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "html":
+		return "html"
+	case "md", "markdown":
+		return "markdown"
+	default:
+		return "text"
+	}
 }
 
 func toPublicNormalUser(user *normalUser) publicNormalUser {

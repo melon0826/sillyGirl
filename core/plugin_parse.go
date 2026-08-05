@@ -10,11 +10,13 @@ import (
 )
 
 var (
-	pluginMetaPattern        = regexp.MustCompile(`\*\s?@([\d\w+-]+)(?:\s+([^\n]+?))?\n`)
+	pluginMetaPattern        = regexp.MustCompile(`(?m)^[ \t]*(?:\*[ \t]?)?@([\d\w+-]+)(?:[ \t]+([^\r\n]+?))?[ \t]*$`)
+	legacyPluginMetaPattern  = regexp.MustCompile(`(?m)^[ \t]*(?://|#+)[ \t]*\[[ \t]*([\d\w+-]+)[ \t]*:[ \t]*(.*)[ \t]*\][^\r\n]*$`)
 	optionalRuleParamPattern = regexp.MustCompile(`\[([^\s\[\]]+)\]`)
 	multiSpacePattern        = regexp.MustCompile("\x20{2,}")
 	classTokenPattern        = regexp.MustCompile(`\S+`)
 	smallCatCallPattern      = regexp.MustCompile(`\b(?:new\s+)?SmallCat\s*[.(]`)
+	formCallPattern          = regexp.MustCompile(`\b(?:new\s+)?form\s*\(`)
 )
 
 func pluginParse(script string, uuid string) (*common.Function, []func()) {
@@ -40,7 +42,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 	var carry bool
 	var classes = []string{}
 	ks := map[string]bool{}
-	ress := pluginMetaPattern.FindAllStringSubmatch(script, -1)
+	ress := pluginMetaEntries(script)
 	for _, res := range ress {
 		switch res[1] {
 		case "rule":
@@ -104,13 +106,13 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 			classes = utils.Unique(classes)
 
 		case "admin":
-			admin = strings.TrimSpace(res[2]) == "true"
+			admin = parsePluginBool(res[2])
 		case "priority":
 			priority = utils.Int(strings.TrimSpace(res[2]))
 		case "title":
 			title = strings.TrimSpace(res[2])
 		case "public":
-			public = strings.TrimSpace(res[2]) == "true"
+			public = parsePluginBool(res[2])
 		case "desc":
 			description = strings.TrimSpace(res[2])
 		case "icon":
@@ -127,15 +129,15 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		case "origin":
 			origin = strings.TrimSpace(res[2])
 		case "module":
-			module = strings.TrimSpace(res[2]) == "true"
+			module = parsePluginBool(res[2])
 		case "carry":
-			carry = strings.TrimSpace(res[2]) != "false"
+			carry = parsePluginBoolDefault(res[2], true)
 		case "on_start":
-			onStart = strings.TrimSpace(res[2]) == "true"
+			onStart = parsePluginBool(res[2])
 		case "web":
-			web = strings.TrimSpace(res[2]) == "true"
+			web = parsePluginBool(res[2])
 		case "smallcat":
-			declared := strings.TrimSpace(res[2]) == "true"
+			declared := parsePluginBool(res[2])
 			usesSmallCatDeclared = &declared
 		}
 	}
@@ -143,7 +145,7 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		usesSmallCat = *usesSmallCatDeclared
 	}
 	if !hasForm {
-		hasForm = strings.Contains(script, "form(") || strings.Contains(script, "SillyGirlPluginConfig") || strings.Contains(script, "sillyGirlCreateSchema")
+		hasForm = formCallPattern.MatchString(script)
 	}
 	return &common.Function{
 		Rules:        rules,
@@ -170,6 +172,56 @@ func pluginParse(script string, uuid string) (*common.Function, []func()) {
 		Carry:        carry,
 		Classes:      classes,
 	}, cbs
+}
+
+func pluginMetaEntries(script string) [][]string {
+	entries := [][]string{}
+	for _, match := range legacyPluginMetaPattern.FindAllStringSubmatch(script, -1) {
+		key := normalizePluginMetaKey(match[1])
+		if key == "" {
+			continue
+		}
+		entries = append(entries, []string{match[0], key, strings.TrimSpace(match[2])})
+	}
+	for _, match := range pluginMetaPattern.FindAllStringSubmatch(script, -1) {
+		key := normalizePluginMetaKey(match[1])
+		if key == "" {
+			continue
+		}
+		value := ""
+		if len(match) >= 3 {
+			value = strings.TrimSpace(match[2])
+		}
+		entries = append(entries, []string{match[0], key, value})
+	}
+	return entries
+}
+
+func normalizePluginMetaKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	switch key {
+	case "", "param":
+		return ""
+	case "description":
+		return "desc"
+	default:
+		return key
+	}
+}
+
+func parsePluginBool(value string) bool {
+	return parsePluginBoolDefault(value, false)
+}
+
+func parsePluginBoolDefault(value string, emptyDefault bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return emptyDefault
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseCronMetaValue(value string) string {

@@ -72,7 +72,7 @@ go build -ldflags "-s -w" -o sillyGirl
 
 ```bash
 # 拉取镜像
-docker pull smallfawn/sillygirl:latest
+docker pull ghcr.io/melon0826/sillygirl:latest
 
 # 运行容器（挂载数据目录持久化存储）
 docker run -d \
@@ -81,7 +81,7 @@ docker run -d \
   -e SILLYGIRL_DATA_PATH=/data \
   -v $(pwd)/data:/data \
   --restart unless-stopped \
-  smallfawn/sillygirl:latest
+  ghcr.io/melon0826/sillygirl:latest
 
 # 查看日志
 docker logs -f sillygirl
